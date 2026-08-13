@@ -27,7 +27,6 @@ const (
 
 	ConvertedFromAnnotation = "crane.konveyor.io/converted-from"
 
-	ConfigMapsRFE            = "https://issues.redhat.com/browse/BUILD-1745"
 	SecretsRFE               = "https://issues.redhat.com/browse/BUILD-1744"
 	DockerStrategyVolumesRFE = "https://issues.redhat.com/browse/BUILD-1747"
 	CustomScriptsRFE         = "https://issues.redhat.com/browse/BUILD-1641"
@@ -401,8 +400,14 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		b.Spec.Source.ContextDir = &bc.Spec.Source.ContextDir
 	}
 
-	if b.Spec.Source != nil && bc.Spec.Source.ConfigMaps != nil {
-		c.Log.Warnf("ConfigMaps are not yet supported in Shipwright build environment. RFE: %s", ConfigMapsRFE)
+	if b.Spec.Source != nil && len(bc.Spec.Source.ConfigMaps) > 0 {
+		for _, cm := range bc.Spec.Source.ConfigMaps {
+			destDir := cm.DestinationDir
+			if destDir == "" {
+				destDir = "."
+			}
+			c.Log.Warnf("BuildConfig '%s' mounts ConfigMap '%s' to '%s' during build. Shipwright uses BuildVolume to mount ConfigMaps, which requires the ClusterBuildStrategy to define an overridable volume. To migrate: (1) add an overridable volume named '%s' in the ClusterBuildStrategy, (2) add a BuildVolume override in the Build spec referencing the ConfigMap, (3) update your Dockerfile to use 'RUN cp' instead of 'ADD/COPY' for ConfigMap files.", bc.Name, cm.ConfigMap.Name, destDir, cm.ConfigMap.Name)
+		}
 	}
 	if b.Spec.Source != nil && bc.Spec.Source.Secrets != nil {
 		c.Log.Warnf("Secrets are not yet supported in Shipwright build environment. RFE: %s", SecretsRFE)

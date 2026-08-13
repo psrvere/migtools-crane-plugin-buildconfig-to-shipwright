@@ -2,11 +2,13 @@ package buildconfig
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/konveyor/crane-lib/transform"
 	shipwrightv1beta1 "github.com/shipwright-io/build/pkg/apis/build/v1beta1"
 	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -1023,5 +1025,89 @@ func TestConvertGitProxyConfig(t *testing.T) {
 	}
 	if envByName["NO_PROXY"] != noProxy {
 		t.Errorf("NO_PROXY = %q, want %q", envByName["NO_PROXY"], noProxy)
+	}
+}
+
+func TestConvertSourceConfigMapsWarnings(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata": map[string]interface{}{
+				"name":      "configmaps-app",
+				"namespace": "myns",
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Git",
+					"git": map[string]interface{}{
+						"uri": "https://github.com/example/myapp.git",
+					},
+					"configMaps": []interface{}{
+						map[string]interface{}{
+							"configMap":      map[string]interface{}{"name": "build-settings"},
+							"destinationDir": "etc/maven",
+						},
+						map[string]interface{}{
+							"configMap": map[string]interface{}{"name": "extra-config"},
+						},
+					},
+				},
+				"strategy": map[string]interface{}{
+					"type":           "Docker",
+					"dockerStrategy": map[string]interface{}{},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{
+						"kind": "DockerImage",
+						"name": "quay.io/example/myapp:latest",
+					},
+				},
+			},
+		}},
+	}
+
+	_, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var cmWarnings []string
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "mounts ConfigMap") {
+			cmWarnings = append(cmWarnings, entry.Message)
+		}
+	}
+
+	if len(cmWarnings) != 2 {
+		t.Fatalf("expected 2 per-ConfigMap warnings, got %d: %v", len(cmWarnings), cmWarnings)
+	}
+
+	wants := []struct {
+		name string
+		dest string
+	}{
+		{name: "build-settings", dest: "'etc/maven'"},
+		{name: "extra-config", dest: "'.'"},
+	}
+	for i, want := range wants {
+		msg := cmWarnings[i]
+		if !strings.Contains(msg, "BuildConfig 'configmaps-app' mounts ConfigMap '"+want.name+"' to "+want.dest) {
+			t.Errorf("warning %d = %q, want ConfigMap %q with dest %s", i, msg, want.name, want.dest)
+		}
+		if !strings.Contains(msg, "(1) add an overridable volume named '"+want.name+"'") ||
+			!strings.Contains(msg, "(2) add a BuildVolume override") ||
+			!strings.Contains(msg, "(3) update your Dockerfile to use 'RUN cp'") {
+			t.Errorf("warning %d missing 3-step migration guidance: %q", i, msg)
+		}
+	}
+
+	// The old generic warning must be gone
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "ConfigMaps are not yet supported") {
+			t.Errorf("old generic ConfigMaps warning still emitted: %q", entry.Message)
+		}
 	}
 }
