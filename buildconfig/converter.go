@@ -462,7 +462,17 @@ func (c *Converter) processOutput(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 			c.Log.Warnf("Output ImageStreamTag %q resolved to fallback URL: %s", name, b.Spec.Output.Image)
 		}
 		if bc.Spec.Output.PushSecret == nil || bc.Spec.Output.PushSecret.Name == "" {
-			c.Log.Warn("No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.")
+			if len(bc.Spec.Output.ImageLabels) > 0 {
+				c.Log.Error("BuildConfig sets output imageLabels but has no pushSecret. " +
+					"Shipwright applies labels via an injected image-processing step that " +
+					"does NOT use the ServiceAccount's registry credentials and will fail " +
+					"with '401 Unauthorized' against the internal registry. Create a " +
+					"docker-registry secret (e.g. from the builder ServiceAccount token: " +
+					"'oc create token builder') and set spec.output.pushSecret on the " +
+					"converted Build.")
+			} else {
+				c.Log.Warn("No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.")
+			}
 		}
 	} else {
 		b.Spec.Output.Image = bc.Spec.Output.To.Name

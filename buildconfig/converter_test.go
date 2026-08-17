@@ -1292,3 +1292,98 @@ func TestConvertSourceConfigMapsWarnings(t *testing.T) {
 		}
 	}
 }
+
+func istagBCWithLabels(labels []interface{}) transform.PluginRequest {
+	spec := map[string]interface{}{
+		"source": map[string]interface{}{
+			"type": "Git",
+			"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+		},
+		"strategy": map[string]interface{}{
+			"type":           "Docker",
+			"dockerStrategy": map[string]interface{}{},
+		},
+		"output": map[string]interface{}{
+			"to": map[string]interface{}{
+				"kind": "ImageStreamTag",
+				"name": "myapp:latest",
+			},
+		},
+	}
+	if labels != nil {
+		spec["output"].(map[string]interface{})["imageLabels"] = labels
+	}
+	return transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata":   map[string]interface{}{"name": "labels-app", "namespace": "myns"},
+			"spec":       spec,
+		}},
+	}
+}
+
+func TestConvertImageLabelsNoPushSecretEscalatesToError(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+
+	_, err := plugin.Run(istagBCWithLabels([]interface{}{
+		map[string]interface{}{"name": "maintainer", "value": "test@example.com"},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var errMsgs []string
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.ErrorLevel && strings.Contains(entry.Message, "imageLabels") {
+			errMsgs = append(errMsgs, entry.Message)
+		}
+	}
+	if len(errMsgs) != 1 {
+		t.Fatalf("expected 1 imageLabels pushSecret error, got %d: %v", len(errMsgs), errMsgs)
+	}
+	msg := errMsgs[0]
+	for _, want := range []string{
+		"image-processing step",
+		"401 Unauthorized",
+		"oc create token builder",
+		"spec.output.pushSecret",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q: %q", want, msg)
+		}
+	}
+
+	// The generic advisory warning must not also fire for this case
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "No explicit pushSecret found") {
+			t.Errorf("generic pushSecret warning also emitted: %q", entry.Message)
+		}
+	}
+}
+
+func TestConvertNoImageLabelsNoPushSecretKeepsWarning(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+
+	_, err := plugin.Run(istagBCWithLabels(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var warns []string
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "No explicit pushSecret found") {
+			warns = append(warns, entry.Message)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 generic pushSecret warning, got %d: %v", len(warns), warns)
+	}
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.ErrorLevel {
+			t.Errorf("unexpected error-level log without imageLabels: %q", entry.Message)
+		}
+	}
+}
