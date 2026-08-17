@@ -47,9 +47,8 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	b.APIVersion = "shipwright.io/v1beta1"
 	b.Namespace = bc.Namespace
 	b.Spec.ParamValues = []shipwrightv1beta1.ParamValue{}
-	b.Annotations = map[string]string{
-		ConvertedFromAnnotation: fmt.Sprintf("build.openshift.io/v1/BuildConfig/%s", bc.Name),
-	}
+	b.Annotations = c.copyAnnotations(bc)
+	b.Annotations[ConvertedFromAnnotation] = fmt.Sprintf("build.openshift.io/v1/BuildConfig/%s", bc.Name)
 	b.Labels = c.copyLabels(bc)
 
 	var newResources []unstructured.Unstructured
@@ -106,21 +105,62 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 // do not exist after migration, so they are filtered out. Returns nil when no
 // labels survive filtering.
 func (c *Converter) copyLabels(bc *buildv1.BuildConfig) map[string]string {
-	if len(bc.Labels) == 0 {
+	return c.filterMetadata("label", bc.Name, bc.Labels,
+		[]string{"openshift.io/build"},
+		[]string{buildv1.BuildConfigLabelDeprecated})
+}
+
+// copyAnnotations copies user-defined metadata.annotations from the
+// BuildConfig to the generated Shipwright Build. Platform-managed annotations
+// (anything under openshift.io/ or kubectl.kubernetes.io/, e.g.
+// openshift.io/generated-by or kubectl.kubernetes.io/last-applied-configuration)
+// describe pre-migration state and are filtered out. Always returns a non-nil
+// map so the caller can add converter-owned annotations to it.
+func (c *Converter) copyAnnotations(bc *buildv1.BuildConfig) map[string]string {
+	annotations := c.filterMetadata("annotation", bc.Name, bc.Annotations,
+		[]string{"openshift.io/", "kubectl.kubernetes.io/"},
+		nil)
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	return annotations
+}
+
+// filterMetadata copies a metadata map (labels or annotations), dropping any
+// key that matches one of dropPrefixes or dropKeys. Each drop is logged at
+// INFO with the metadata kind so migrations remain auditable. Returns nil when
+// the input is empty or nothing survives filtering, so empty maps are omitted
+// from the serialized Build.
+func (c *Converter) filterMetadata(kind, bcName string, in map[string]string, dropPrefixes, dropKeys []string) map[string]string {
+	if len(in) == 0 {
 		return nil
 	}
-	labels := map[string]string{}
-	for k, v := range bc.Labels {
-		if strings.HasPrefix(k, "openshift.io/build") || k == buildv1.BuildConfigLabelDeprecated {
-			c.Log.Infof("Dropping OpenShift-internal label %q from BuildConfig %s — it references pre-migration build machinery", k, bc.Name)
+	out := map[string]string{}
+	for k, v := range in {
+		if metadataKeyMatches(k, dropPrefixes, dropKeys) {
+			c.Log.Infof("Dropping OpenShift-internal %s %q from BuildConfig %s — it references pre-migration build machinery", kind, k, bcName)
 			continue
 		}
-		labels[k] = v
+		out[k] = v
 	}
-	if len(labels) == 0 {
+	if len(out) == 0 {
 		return nil
 	}
-	return labels
+	return out
+}
+
+func metadataKeyMatches(key string, prefixes, keys []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(key, p) {
+			return true
+		}
+	}
+	for _, k := range keys {
+		if key == k {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) error {

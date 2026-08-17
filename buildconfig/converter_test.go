@@ -14,8 +14,8 @@ import (
 
 func TestRunSkipsNonBuildConfig(t *testing.T) {
 	tests := []struct {
-		name       string
-		resource   map[string]interface{}
+		name         string
+		resource     map[string]interface{}
 		wantWhiteOut bool
 	}{
 		{
@@ -1331,5 +1331,120 @@ func TestConvertMetadataLabelsAbsent(t *testing.T) {
 	metadata, _ := resp.NewResources[0].Object["metadata"].(map[string]interface{})
 	if _, exists := metadata["labels"]; exists {
 		t.Errorf("expected no labels key in metadata when all labels are filtered, got %v", metadata["labels"])
+	}
+}
+
+func annotationsTestRequest(name string, annotations map[string]interface{}) transform.PluginRequest {
+	request := labelsTestRequest(name, nil)
+	if annotations != nil {
+		metadata := request.Unstructured.Object["metadata"].(map[string]interface{})
+		metadata["annotations"] = annotations
+	}
+	return request
+}
+
+func TestConvertMetadataAnnotationsCopied(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	request := annotationsTestRequest("annotated-app", map[string]interface{}{
+		"team":                        "builds",
+		"contact":                     "builds@example.com",
+		"app.kubernetes.io/component": "backend",
+	})
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+
+	annotations := resp.NewResources[0].GetAnnotations()
+	want := map[string]string{
+		"team":                             "builds",
+		"contact":                          "builds@example.com",
+		"app.kubernetes.io/component":      "backend",
+		"crane.konveyor.io/converted-from": "build.openshift.io/v1/BuildConfig/annotated-app",
+	}
+	if len(annotations) != len(want) {
+		t.Fatalf("expected %d annotations, got %d: %v", len(want), len(annotations), annotations)
+	}
+	for k, v := range want {
+		if annotations[k] != v {
+			t.Errorf("annotation %q = %q, want %q", k, annotations[k], v)
+		}
+	}
+}
+
+func TestConvertMetadataAnnotationsFiltersInternal(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+	request := annotationsTestRequest("internal-annotations-app", map[string]interface{}{
+		"openshift.io/generated-by":                        "OpenShiftNewApp",
+		"openshift.io/build-config.name":                   "internal-annotations-app",
+		"kubectl.kubernetes.io/last-applied-configuration": "{}",
+		"team": "builds",
+	})
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+
+	annotations := resp.NewResources[0].GetAnnotations()
+	if len(annotations) != 2 || annotations["team"] != "builds" ||
+		annotations["crane.konveyor.io/converted-from"] == "" {
+		t.Errorf("expected only user annotation plus converted-from to survive filtering, got %v", annotations)
+	}
+
+	dropLogs := 0
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "Dropping OpenShift-internal annotation") {
+			dropLogs++
+		}
+	}
+	if dropLogs != 3 {
+		t.Errorf("expected 3 dropped-annotation log entries, got %d", dropLogs)
+	}
+}
+
+func TestConvertMetadataAnnotationsAbsent(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+
+	// No annotations at all — converted-from must still be present
+	resp, err := plugin.Run(annotationsTestRequest("no-annotations-app", nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+	annotations := resp.NewResources[0].GetAnnotations()
+	if len(annotations) != 1 ||
+		annotations["crane.konveyor.io/converted-from"] != "build.openshift.io/v1/BuildConfig/no-annotations-app" {
+		t.Errorf("expected only converted-from annotation, got %v", annotations)
+	}
+}
+
+func TestConvertMetadataAnnotationsConvertedFromNotOverridable(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	request := annotationsTestRequest("override-app", map[string]interface{}{
+		"crane.konveyor.io/converted-from": "user-supplied-garbage",
+	})
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+	annotations := resp.NewResources[0].GetAnnotations()
+	if annotations["crane.konveyor.io/converted-from"] != "build.openshift.io/v1/BuildConfig/override-app" {
+		t.Errorf("converter-owned converted-from annotation must win over user value, got %q",
+			annotations["crane.konveyor.io/converted-from"])
 	}
 }
