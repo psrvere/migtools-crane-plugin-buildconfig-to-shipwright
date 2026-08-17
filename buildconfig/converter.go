@@ -87,6 +87,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 
 	c.processSource(bc, b)
 	c.processOutput(bc, b)
+	c.processCompletionDeadline(bc, b)
 	c.addRegistries(b)
 
 	buildUnstructured, err := toUnstructured(b)
@@ -471,6 +472,21 @@ func (c *Converter) processOutput(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	if bc.Spec.Output.PushSecret != nil && bc.Spec.Output.PushSecret.Name != "" {
 		b.Spec.Output.PushSecret = &bc.Spec.Output.PushSecret.Name
 	}
+}
+
+// processCompletionDeadline maps BuildConfig completionDeadlineSeconds to the
+// Shipwright Build timeout so that migrated builds keep the same execution deadline
+func (c *Converter) processCompletionDeadline(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) {
+	if bc.Spec.CompletionDeadlineSeconds == nil {
+		return
+	}
+
+	timeout := metav1.Duration{
+		Duration: time.Duration(*bc.Spec.CompletionDeadlineSeconds) * time.Second,
+	}
+	b.Spec.Timeout = &timeout
+	c.Log.Infof("Mapping completionDeadlineSeconds %ds to Build timeout %s for BuildConfig %s",
+		*bc.Spec.CompletionDeadlineSeconds, timeout.Duration, bc.Name)
 }
 
 func (c *Converter) addRegistries(b *shipwrightv1beta1.Build) {
