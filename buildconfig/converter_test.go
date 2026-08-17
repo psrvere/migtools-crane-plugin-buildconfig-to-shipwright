@@ -1201,6 +1201,8 @@ func TestConvertSourceConfigMapsWarnings(t *testing.T) {
 
 func TestProcessCompletionDeadline(t *testing.T) {
 	deadline := int64(1800)
+	maxDeadline := int64(maxTimeoutSeconds)
+	overflowDeadline := int64(maxTimeoutSeconds) + 1
 
 	tests := []struct {
 		name            string
@@ -1230,6 +1232,36 @@ func TestProcessCompletionDeadline(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: buildv1.BuildConfigSpec{},
+			},
+			expectedTimeout: nil,
+		},
+		{
+			name: "completionDeadlineSeconds at maximum representable value maps to Build timeout",
+			buildConfig: &buildv1.BuildConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bc",
+					Namespace: "default",
+				},
+				Spec: buildv1.BuildConfigSpec{
+					CommonSpec: buildv1.CommonSpec{
+						CompletionDeadlineSeconds: &maxDeadline,
+					},
+				},
+			},
+			expectedTimeout: &metav1.Duration{Duration: time.Duration(maxTimeoutSeconds) * time.Second},
+		},
+		{
+			name: "completionDeadlineSeconds above maximum is skipped to avoid overflow",
+			buildConfig: &buildv1.BuildConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bc",
+					Namespace: "default",
+				},
+				Spec: buildv1.BuildConfigSpec{
+					CommonSpec: buildv1.CommonSpec{
+						CompletionDeadlineSeconds: &overflowDeadline,
+					},
+				},
 			},
 			expectedTimeout: nil,
 		},

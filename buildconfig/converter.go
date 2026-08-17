@@ -3,6 +3,7 @@ package buildconfig
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -474,6 +475,10 @@ func (c *Converter) processOutput(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	}
 }
 
+// maxTimeoutSeconds is the largest completionDeadlineSeconds value that can be
+// represented as a time.Duration (int64 nanoseconds) without overflowing.
+const maxTimeoutSeconds = math.MaxInt64 / int64(time.Second)
+
 // processCompletionDeadline maps BuildConfig completionDeadlineSeconds to the
 // Shipwright Build timeout so that migrated builds keep the same execution deadline
 func (c *Converter) processCompletionDeadline(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) {
@@ -481,12 +486,19 @@ func (c *Converter) processCompletionDeadline(bc *buildv1.BuildConfig, b *shipwr
 		return
 	}
 
+	seconds := *bc.Spec.CompletionDeadlineSeconds
+	if seconds > maxTimeoutSeconds {
+		c.Log.Warnf("completionDeadlineSeconds %d on BuildConfig %s exceeds the maximum representable timeout of %d seconds; leaving Build timeout unset",
+			seconds, bc.Name, maxTimeoutSeconds)
+		return
+	}
+
 	timeout := metav1.Duration{
-		Duration: time.Duration(*bc.Spec.CompletionDeadlineSeconds) * time.Second,
+		Duration: time.Duration(seconds) * time.Second,
 	}
 	b.Spec.Timeout = &timeout
 	c.Log.Infof("Mapping completionDeadlineSeconds %ds to Build timeout %s for BuildConfig %s",
-		*bc.Spec.CompletionDeadlineSeconds, timeout.Duration, bc.Name)
+		seconds, timeout.Duration, bc.Name)
 }
 
 func (c *Converter) addRegistries(b *shipwrightv1beta1.Build) {
