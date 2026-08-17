@@ -50,6 +50,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	b.Annotations = map[string]string{
 		ConvertedFromAnnotation: fmt.Sprintf("build.openshift.io/v1/BuildConfig/%s", bc.Name),
 	}
+	b.Labels = c.copyLabels(bc)
 
 	var newResources []unstructured.Unstructured
 
@@ -97,6 +98,29 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	result := []unstructured.Unstructured{buildUnstructured}
 	result = append(result, newResources...)
 	return result, nil
+}
+
+// copyLabels copies user-defined metadata.labels from the BuildConfig to the
+// generated Shipwright Build. OpenShift-internal labels (openshift.io/build*
+// and the deprecated "buildconfig" label) reference BuildConfig concepts that
+// do not exist after migration, so they are filtered out. Returns nil when no
+// labels survive filtering.
+func (c *Converter) copyLabels(bc *buildv1.BuildConfig) map[string]string {
+	if len(bc.Labels) == 0 {
+		return nil
+	}
+	labels := map[string]string{}
+	for k, v := range bc.Labels {
+		if strings.HasPrefix(k, "openshift.io/build") || k == buildv1.BuildConfigLabelDeprecated {
+			c.Log.Infof("Dropping OpenShift-internal label %q from BuildConfig %s — it references pre-migration build machinery", k, bc.Name)
+			continue
+		}
+		labels[k] = v
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+	return labels
 }
 
 func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) error {

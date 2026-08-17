@@ -1195,3 +1195,141 @@ func TestConvertSourceConfigMapsWarnings(t *testing.T) {
 		}
 	}
 }
+
+func labelsTestRequest(name string, labels map[string]interface{}) transform.PluginRequest {
+	metadata := map[string]interface{}{
+		"name":      name,
+		"namespace": "myns",
+	}
+	if labels != nil {
+		metadata["labels"] = labels
+	}
+	return transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata":   metadata,
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Git",
+					"git": map[string]interface{}{
+						"uri": "https://github.com/example/myapp.git",
+					},
+				},
+				"strategy": map[string]interface{}{
+					"type":           "Docker",
+					"dockerStrategy": map[string]interface{}{},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{
+						"kind": "DockerImage",
+						"name": "quay.io/example/myapp:latest",
+					},
+				},
+			},
+		}},
+	}
+}
+
+func TestConvertMetadataLabelsCopied(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	request := labelsTestRequest("labeled-app", map[string]interface{}{
+		"app.kubernetes.io/name":    "myapp",
+		"app.kubernetes.io/version": "1.2.3",
+		"team":                      "builds",
+	})
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+
+	labels := resp.NewResources[0].GetLabels()
+	want := map[string]string{
+		"app.kubernetes.io/name":    "myapp",
+		"app.kubernetes.io/version": "1.2.3",
+		"team":                      "builds",
+	}
+	if len(labels) != len(want) {
+		t.Fatalf("expected %d labels, got %d: %v", len(want), len(labels), labels)
+	}
+	for k, v := range want {
+		if labels[k] != v {
+			t.Errorf("label %q = %q, want %q", k, labels[k], v)
+		}
+	}
+}
+
+func TestConvertMetadataLabelsFiltersInternal(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+	request := labelsTestRequest("internal-labels-app", map[string]interface{}{
+		"openshift.io/build-config.name":  "internal-labels-app",
+		"openshift.io/build.name":         "internal-labels-app-1",
+		"openshift.io/build.start-policy": "Serial",
+		"buildconfig":                     "internal-labels-app",
+		"app.kubernetes.io/name":          "myapp",
+	})
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+
+	labels := resp.NewResources[0].GetLabels()
+	if len(labels) != 1 || labels["app.kubernetes.io/name"] != "myapp" {
+		t.Errorf("expected only user label to survive filtering, got %v", labels)
+	}
+
+	dropLogs := 0
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "Dropping OpenShift-internal label") {
+			dropLogs++
+		}
+	}
+	if dropLogs != 4 {
+		t.Errorf("expected 4 dropped-label log entries, got %d", dropLogs)
+	}
+}
+
+func TestConvertMetadataLabelsAbsent(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+
+	// No labels at all
+	resp, err := plugin.Run(labelsTestRequest("no-labels-app", nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+	if labels := resp.NewResources[0].GetLabels(); len(labels) != 0 {
+		t.Errorf("expected no labels on Build, got %v", labels)
+	}
+
+	// Only internal labels — everything filtered, labels must be omitted entirely
+	resp, err = plugin.Run(labelsTestRequest("only-internal-app", map[string]interface{}{
+		"openshift.io/build-config.name": "only-internal-app",
+		"buildconfig":                    "only-internal-app",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+	if labels := resp.NewResources[0].GetLabels(); len(labels) != 0 {
+		t.Errorf("expected all-internal labels to be fully filtered, got %v", labels)
+	}
+	// The labels key itself must not be present as an empty map in the output object
+	metadata, _ := resp.NewResources[0].Object["metadata"].(map[string]interface{})
+	if _, exists := metadata["labels"]; exists {
+		t.Errorf("expected no labels key in metadata when all labels are filtered, got %v", metadata["labels"])
+	}
+}
