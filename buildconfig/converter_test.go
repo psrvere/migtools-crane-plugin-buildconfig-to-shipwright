@@ -13,7 +13,9 @@ import (
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 func TestRunSkipsNonBuildConfig(t *testing.T) {
@@ -1531,5 +1533,276 @@ func TestConvertNoOutputImage(t *testing.T) {
 				t.Error("expected a warning explaining the BuildConfig has no output image")
 			}
 		})
+	}
+}
+
+// buildRunTemplate mirrors the YAML structure of the BuildRun template
+// annotation (BUILD-2261) for assertions.
+type buildRunTemplate struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Spec struct {
+		Build struct {
+			Name string `json:"name"`
+		} `json:"build"`
+		ServiceAccount string `json:"serviceAccount"`
+		StepResources  []struct {
+			Name      string                      `json:"name"`
+			Resources corev1.ResourceRequirements `json:"resources"`
+		} `json:"stepResources"`
+	} `json:"spec"`
+}
+
+func runBuildRunTemplateConversion(t *testing.T, spec map[string]interface{}) map[string]string {
+	t.Helper()
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata": map[string]interface{}{
+				"name":      "myapp",
+				"namespace": "myns",
+			},
+			"spec": spec,
+		}},
+	}
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected at least 1 new resource")
+	}
+	return resp.NewResources[0].GetAnnotations()
+}
+
+func TestConvertResourcesDockerStrategy(t *testing.T) {
+	annotations := runBuildRunTemplateConversion(t, map[string]interface{}{
+		"source": map[string]interface{}{
+			"type": "Git",
+			"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+		},
+		"strategy": map[string]interface{}{
+			"type":           "Docker",
+			"dockerStrategy": map[string]interface{}{},
+		},
+		"resources": map[string]interface{}{
+			"requests": map[string]interface{}{"cpu": "500m", "memory": "1Gi"},
+			"limits":   map[string]interface{}{"cpu": "2", "memory": "4Gi"},
+		},
+	})
+
+	value, ok := annotations[BuildRunTemplateAnnotation]
+	if !ok {
+		t.Fatalf("expected annotation %s, got: %v", BuildRunTemplateAnnotation, annotations)
+	}
+
+	tmpl := buildRunTemplate{}
+	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
+		t.Fatalf("annotation value is not valid YAML: %v\n%s", err, value)
+	}
+
+	if tmpl.APIVersion != "shipwright.io/v1beta1" {
+		t.Errorf("expected apiVersion shipwright.io/v1beta1, got %s", tmpl.APIVersion)
+	}
+	if tmpl.Kind != "BuildRun" {
+		t.Errorf("expected kind BuildRun, got %s", tmpl.Kind)
+	}
+	if tmpl.Metadata.Name != "myapp-buildrun" {
+		t.Errorf("expected metadata.name myapp-buildrun, got %s", tmpl.Metadata.Name)
+	}
+	if tmpl.Metadata.Namespace != "myns" {
+		t.Errorf("expected metadata.namespace myns, got %s", tmpl.Metadata.Namespace)
+	}
+	if tmpl.Spec.Build.Name != "myapp" {
+		t.Errorf("expected spec.build.name myapp, got %s", tmpl.Spec.Build.Name)
+	}
+	if tmpl.Spec.ServiceAccount != "" {
+		t.Errorf("expected no serviceAccount, got %s", tmpl.Spec.ServiceAccount)
+	}
+	if len(tmpl.Spec.StepResources) != 1 {
+		t.Fatalf("expected 1 stepResources entry, got %d", len(tmpl.Spec.StepResources))
+	}
+	step := tmpl.Spec.StepResources[0]
+	if step.Name != "build-and-push" {
+		t.Errorf("expected step name build-and-push, got %s", step.Name)
+	}
+	if step.Resources.Requests.Cpu().String() != "500m" || step.Resources.Requests.Memory().String() != "1Gi" {
+		t.Errorf("unexpected requests: %v", step.Resources.Requests)
+	}
+	if step.Resources.Limits.Cpu().String() != "2" || step.Resources.Limits.Memory().String() != "4Gi" {
+		t.Errorf("unexpected limits: %v", step.Resources.Limits)
+	}
+}
+
+func TestConvertResourcesSourceStrategyWithServiceAccount(t *testing.T) {
+	annotations := runBuildRunTemplateConversion(t, map[string]interface{}{
+		"source": map[string]interface{}{
+			"type": "Git",
+			"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+		},
+		"strategy": map[string]interface{}{
+			"type": "Source",
+			"sourceStrategy": map[string]interface{}{
+				"from": map[string]interface{}{
+					"kind": "DockerImage",
+					"name": "registry.example.com/builder:latest",
+				},
+				"pullSecret": map[string]interface{}{"name": "my-pull-secret"},
+			},
+		},
+		"resources": map[string]interface{}{
+			"limits": map[string]interface{}{"memory": "2Gi"},
+		},
+	})
+
+	value, ok := annotations[BuildRunTemplateAnnotation]
+	if !ok {
+		t.Fatalf("expected annotation %s, got: %v", BuildRunTemplateAnnotation, annotations)
+	}
+
+	tmpl := buildRunTemplate{}
+	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
+		t.Fatalf("annotation value is not valid YAML: %v\n%s", err, value)
+	}
+
+	// Generated ServiceAccount (pull-secret flow) must be referenced.
+	if tmpl.Spec.ServiceAccount != "myapp" {
+		t.Errorf("expected serviceAccount myapp, got %q", tmpl.Spec.ServiceAccount)
+	}
+
+	if len(tmpl.Spec.StepResources) != 2 {
+		t.Fatalf("expected 2 stepResources entries, got %d", len(tmpl.Spec.StepResources))
+	}
+	wantSteps := []string{"s2i-generate", "buildah"}
+	for i, want := range wantSteps {
+		step := tmpl.Spec.StepResources[i]
+		if step.Name != want {
+			t.Errorf("expected step %d name %s, got %s", i, want, step.Name)
+		}
+		if step.Resources.Limits.Memory().String() != "2Gi" {
+			t.Errorf("step %s: unexpected limits: %v", want, step.Resources.Limits)
+		}
+		if len(step.Resources.Requests) != 0 {
+			t.Errorf("step %s: expected no requests, got %v", want, step.Resources.Requests)
+		}
+	}
+}
+
+func TestConvertResourcesRequestsOnly(t *testing.T) {
+	annotations := runBuildRunTemplateConversion(t, map[string]interface{}{
+		"source": map[string]interface{}{
+			"type": "Git",
+			"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+		},
+		"strategy": map[string]interface{}{
+			"type":           "Docker",
+			"dockerStrategy": map[string]interface{}{},
+		},
+		"resources": map[string]interface{}{
+			"requests": map[string]interface{}{"cpu": "250m"},
+		},
+	})
+
+	value, ok := annotations[BuildRunTemplateAnnotation]
+	if !ok {
+		t.Fatalf("expected annotation %s for requests-only resources", BuildRunTemplateAnnotation)
+	}
+	tmpl := buildRunTemplate{}
+	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
+		t.Fatalf("annotation value is not valid YAML: %v", err)
+	}
+	if tmpl.Spec.StepResources[0].Resources.Requests.Cpu().String() != "250m" {
+		t.Errorf("unexpected requests: %v", tmpl.Spec.StepResources[0].Resources.Requests)
+	}
+	if len(tmpl.Spec.StepResources[0].Resources.Limits) != 0 {
+		t.Errorf("expected no limits, got %v", tmpl.Spec.StepResources[0].Resources.Limits)
+	}
+}
+
+func TestConvertResourcesEmptyNoAnnotation(t *testing.T) {
+	specs := map[string]map[string]interface{}{
+		"no resources field": {
+			"source": map[string]interface{}{
+				"type": "Git",
+				"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+			},
+			"strategy": map[string]interface{}{
+				"type":           "Docker",
+				"dockerStrategy": map[string]interface{}{},
+			},
+		},
+		"empty resources": {
+			"source": map[string]interface{}{
+				"type": "Git",
+				"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+			},
+			"strategy": map[string]interface{}{
+				"type":           "Docker",
+				"dockerStrategy": map[string]interface{}{},
+			},
+			"resources": map[string]interface{}{},
+		},
+	}
+
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			annotations := runBuildRunTemplateConversion(t, spec)
+			if _, ok := annotations[BuildRunTemplateAnnotation]; ok {
+				t.Errorf("expected no %s annotation, got: %v", BuildRunTemplateAnnotation, annotations)
+			}
+		})
+	}
+}
+
+func parseBuildConfigJSON(t *testing.T, raw string) *buildv1.BuildConfig {
+	t.Helper()
+	bc := &buildv1.BuildConfig{}
+	if err := json.Unmarshal([]byte(raw), bc); err != nil {
+		t.Fatalf("failed to parse BuildConfig JSON: %v", err)
+	}
+	return bc
+}
+
+func TestConvertResourcesLogsWarning(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	converter := &Converter{Log: logger}
+
+	bcJSON := `{
+		"apiVersion": "build.openshift.io/v1",
+		"kind": "BuildConfig",
+		"metadata": {"name": "myapp", "namespace": "myns"},
+		"spec": {
+			"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
+			"strategy": {"type": "Docker", "dockerStrategy": {}},
+			"resources": {"limits": {"memory": "4Gi"}}
+		}
+	}`
+	bc := parseBuildConfigJSON(t, bcJSON)
+
+	if _, err := converter.Convert(bc); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	foundWarn := false
+	foundInfo := false
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "Resource requirements are not supported on Shipwright Build") {
+			foundWarn = true
+		}
+		if entry.Level == logrus.InfoLevel && strings.Contains(entry.Message, "Generated BuildRun template with resource requirements") {
+			foundInfo = true
+		}
+	}
+	if !foundWarn {
+		t.Error("expected WARN log about unsupported resource requirements")
+	}
+	if !foundInfo {
+		t.Error("expected INFO log about generated BuildRun template")
 	}
 }

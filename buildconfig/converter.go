@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -26,7 +27,8 @@ const (
 
 	Timeout = 10 * time.Minute
 
-	ConvertedFromAnnotation = "crane.konveyor.io/converted-from"
+	ConvertedFromAnnotation    = "crane.konveyor.io/converted-from"
+	BuildRunTemplateAnnotation = "buildconfig-to-shipwright/buildrun-template"
 
 	ConfigMapsRFE            = "https://issues.redhat.com/browse/BUILD-1745"
 	SecretsRFE               = "https://issues.redhat.com/browse/BUILD-1744"
@@ -117,9 +119,11 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	}
 
 	// PullSecret → ServiceAccount
+	generatedSA := ""
 	pullSecret := c.getPullSecret(bc)
 	if pullSecret != nil {
 		sa := c.generateServiceAccount(bc, pullSecret)
+		generatedSA = sa.Name
 		saUnstructured, err := toUnstructured(sa)
 		if err != nil {
 			return nil, fmt.Errorf("error converting ServiceAccount to unstructured: %w", err)
@@ -131,6 +135,10 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processOutput(bc, b)
 	c.processCompletionDeadline(bc, b)
 	c.addRegistries(b)
+
+	if err := c.processResources(bc, b, generatedSA); err != nil {
+		return nil, err
+	}
 
 	buildUnstructured, err := toUnstructured(b)
 	if err != nil {
@@ -708,6 +716,76 @@ func (c *Converter) addRegistries(b *shipwrightv1beta1.Build) {
 			Values: toSingleValues(c.Opts.BlockRegistries),
 		})
 	}
+}
+
+// processResources carries BuildConfig spec.resources forward as a BuildRun
+// template annotation on the converted Build. The Shipwright Build CRD has no
+// resources field — per-step overrides live on BuildRun.spec.stepResources —
+// and emitting a real BuildRun into the migration stream would immediately
+// trigger a build on the target cluster. The annotation is inert: the user
+// reviews the template, copies it out, and applies it when they want to run
+// a build. See BUILD-2261.
+func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build, generatedSA string) error {
+	res := bc.Spec.Resources
+	if len(res.Requests) == 0 && len(res.Limits) == 0 {
+		return nil
+	}
+
+	// Step names must match the referenced ClusterBuildStrategy. Verified on
+	// cluster (OpenShift Builds operator 1.8.1): buildah has a single
+	// "build-and-push" step; source-to-image runs "s2i-generate" + "buildah".
+	var stepNames []string
+	switch bc.Spec.Strategy.Type {
+	case buildv1.DockerBuildStrategyType:
+		stepNames = []string{"build-and-push"}
+	case buildv1.SourceBuildStrategyType:
+		stepNames = []string{"s2i-generate", "buildah"}
+	default:
+		return nil
+	}
+
+	stepResources := make([]map[string]interface{}, 0, len(stepNames))
+	for _, step := range stepNames {
+		stepResources = append(stepResources, map[string]interface{}{
+			"name":      step,
+			"resources": res,
+		})
+	}
+
+	spec := map[string]interface{}{
+		"build": map[string]interface{}{
+			"name": b.Name,
+		},
+		"stepResources": stepResources,
+	}
+	if generatedSA != "" {
+		spec["serviceAccount"] = generatedSA
+	}
+
+	// Built as a plain map rather than shipwright typed structs so the
+	// template YAML stays free of marshaling artifacts such as
+	// "creationTimestamp: null" and "status: {}".
+	template := map[string]interface{}{
+		"apiVersion": "shipwright.io/v1beta1",
+		"kind":       "BuildRun",
+		"metadata": map[string]interface{}{
+			"name":      b.Name + "-buildrun",
+			"namespace": b.Namespace,
+		},
+		"spec": spec,
+	}
+
+	templateYAML, err := yaml.Marshal(template)
+	if err != nil {
+		return fmt.Errorf("error marshaling BuildRun template for BuildConfig %s: %w", bc.Name, err)
+	}
+
+	b.Annotations[BuildRunTemplateAnnotation] = string(templateYAML)
+
+	c.Log.Infof("Generated BuildRun template with resource requirements (requests: %v, limits: %v) in annotation %s", res.Requests, res.Limits, BuildRunTemplateAnnotation)
+	c.Log.Warnf("Resource requirements are not supported on Shipwright Build. Apply the BuildRun template from annotation %s (after review) or set stepResources on each BuildRun you create.", BuildRunTemplateAnnotation)
+
+	return nil
 }
 
 func toSingleValues(registries []string) []shipwrightv1beta1.SingleValue {
