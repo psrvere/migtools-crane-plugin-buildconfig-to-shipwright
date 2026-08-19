@@ -1787,3 +1787,89 @@ func TestConvertResourcesLogsWarning(t *testing.T) {
 		t.Error("expected INFO log about generated BuildRun template")
 	}
 }
+
+// TestConvertResourcesCustomStrategyOmitsStepResources covers the CodeRabbit
+// finding on BUILD-2261: when the strategy is remapped to a custom
+// ClusterBuildStrategy its step names are unknown, so the BuildRun template
+// must still be emitted but without stepResources (default step names would
+// be rejected at admission), and the user must be warned to fill them in.
+func TestConvertResourcesCustomStrategyOmitsStepResources(t *testing.T) {
+	tests := []struct {
+		name         string
+		mapping      map[string]string
+		strategyJSON string
+		wantStrategy string
+	}{
+		{
+			name:         "Docker remapped",
+			mapping:      map[string]string{"docker": "my-custom-buildah"},
+			strategyJSON: `{"type": "Docker", "dockerStrategy": {}}`,
+			wantStrategy: "my-custom-buildah",
+		},
+		{
+			name:         "Source remapped",
+			mapping:      map[string]string{"s2i": "my-custom-s2i"},
+			strategyJSON: `{"type": "Source", "sourceStrategy": {"from": {"kind": "DockerImage", "name": "python:3.9"}}}`,
+			wantStrategy: "my-custom-s2i",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, hook := logrustest.NewNullLogger()
+			converter := &Converter{
+				Log:  logger,
+				Opts: PluginOptionalFields{StrategyMapping: tt.mapping},
+			}
+
+			bcJSON := `{
+				"apiVersion": "build.openshift.io/v1",
+				"kind": "BuildConfig",
+				"metadata": {"name": "myapp", "namespace": "myns"},
+				"spec": {
+					"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
+					"strategy": ` + tt.strategyJSON + `,
+					"resources": {"requests": {"cpu": "250m"}, "limits": {"memory": "4Gi"}}
+				}
+			}`
+			bc := parseBuildConfigJSON(t, bcJSON)
+
+			result, err := converter.Convert(bc)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			b := &shipwrightv1beta1.Build{}
+			jsonBytes, _ := json.Marshal(result[0].Object)
+			json.Unmarshal(jsonBytes, b)
+			if b.Spec.Strategy.Name != tt.wantStrategy {
+				t.Errorf("expected strategy %s, got %s", tt.wantStrategy, b.Spec.Strategy.Name)
+			}
+
+			value, ok := result[0].GetAnnotations()[BuildRunTemplateAnnotation]
+			if !ok {
+				t.Fatalf("expected annotation %s on converted Build", BuildRunTemplateAnnotation)
+			}
+			tmpl := unmarshalBuildRunTemplate(t, value)
+			if len(tmpl.Spec.StepResources) != 0 {
+				t.Errorf("expected stepResources omitted for custom strategy, got %v", tmpl.Spec.StepResources)
+			}
+			if tmpl.Spec.Build.Name == nil || *tmpl.Spec.Build.Name != b.Name {
+				t.Errorf("expected template to reference build %q, got %v", b.Name, tmpl.Spec.Build.Name)
+			}
+
+			foundOmitWarn := false
+			for _, entry := range hook.AllEntries() {
+				if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "custom mapping with unknown step names") {
+					foundOmitWarn = true
+				}
+				if entry.Level == logrus.InfoLevel && strings.Contains(entry.Message, "Generated BuildRun template with resource requirements") {
+					t.Error("did not expect INFO log about generated stepResources for custom strategy")
+				}
+			}
+			if !foundOmitWarn {
+				t.Error("expected WARN log about omitted stepResources for custom strategy mapping")
+			}
+		})
+	}
+}
