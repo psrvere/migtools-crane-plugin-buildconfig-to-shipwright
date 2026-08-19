@@ -1,6 +1,7 @@
 package buildconfig
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,6 +10,100 @@ import (
 	shipwrightv1beta1 "github.com/shipwright-io/build/pkg/apis/build/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// sanitizedTrigger is the schema of one OriginalTriggersAnnotation entry:
+// only non-secret, non-runtime trigger fields survive sanitization. The
+// original trigger type is preserved verbatim (including deprecated lowercase
+// variants) — this is a preservation record, not a normalization.
+type sanitizedTrigger struct {
+	Type            buildv1.BuildTriggerType `json:"type"`
+	SecretReference *sanitizedSecretRef      `json:"secretReference,omitempty"`
+	AllowEnv        bool                     `json:"allowEnv,omitempty"`
+	ImageChange     *sanitizedImageChange    `json:"imageChange,omitempty"`
+}
+
+type sanitizedSecretRef struct {
+	Name string `json:"name"`
+}
+
+type sanitizedImageChange struct {
+	From   *sanitizedFrom `json:"from,omitempty"`
+	Paused bool           `json:"paused,omitempty"`
+}
+
+type sanitizedFrom struct {
+	Kind      string `json:"kind,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name,omitempty"`
+}
+
+// triggerWebhook returns the webhook config for whichever webhook field
+// matches the trigger's (canonicalized) type, or nil for non-webhook types.
+func triggerWebhook(trigger buildv1.BuildTriggerPolicy) *buildv1.WebHookTrigger {
+	switch canonicalTriggerType(trigger.Type) {
+	case buildv1.GitHubWebHookBuildTriggerType:
+		return trigger.GitHubWebHook
+	case buildv1.GenericWebHookBuildTriggerType:
+		return trigger.GenericWebHook
+	case buildv1.GitLabWebHookBuildTriggerType:
+		return trigger.GitLabWebHook
+	case buildv1.BitbucketWebHookBuildTriggerType:
+		return trigger.BitbucketWebHook
+	}
+	return nil
+}
+
+// sanitizeTrigger keeps type, secretReference name, allowEnv, imageChange
+// from, and paused; it drops deprecated inline secret values and
+// lastTriggeredImageID so secrets and runtime state never reach the
+// annotation.
+func sanitizeTrigger(trigger buildv1.BuildTriggerPolicy) sanitizedTrigger {
+	s := sanitizedTrigger{Type: trigger.Type}
+	if wh := triggerWebhook(trigger); wh != nil {
+		if wh.SecretReference != nil && wh.SecretReference.Name != "" {
+			s.SecretReference = &sanitizedSecretRef{Name: wh.SecretReference.Name}
+		}
+		s.AllowEnv = wh.AllowEnv
+	}
+	if ict := trigger.ImageChange; ict != nil {
+		ic := &sanitizedImageChange{Paused: ict.Paused}
+		if ict.From != nil {
+			ic.From = &sanitizedFrom{Kind: ict.From.Kind, Namespace: ict.From.Namespace, Name: ict.From.Name}
+		}
+		if ic.From != nil || ic.Paused {
+			s.ImageChange = ic
+		}
+	}
+	return s
+}
+
+// preserveOriginalTriggers stores the sanitized spec.triggers on the
+// converted Build under OriginalTriggersAnnotation (BUILD-2392). No
+// annotation is written when the BuildConfig has no triggers.
+//
+// Nothing reads the annotation today; it exists so that once triggers become
+// available (upstream trigger sources BUILD-2074, operator install
+// BUILD-1706), a tool or a person can rebuild them without the original
+// BuildConfig. Deprecated inline webhook secret values and
+// lastTriggeredImageID (runtime state) are never included.
+func (c *Converter) preserveOriginalTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) {
+	if b == nil || len(bc.Spec.Triggers) == 0 {
+		return
+	}
+	sanitized := make([]sanitizedTrigger, 0, len(bc.Spec.Triggers))
+	for _, trigger := range bc.Spec.Triggers {
+		sanitized = append(sanitized, sanitizeTrigger(trigger))
+	}
+	data, err := json.Marshal(sanitized)
+	if err != nil {
+		c.Log.Warnf("BuildConfig %s: could not preserve original triggers in annotation %s: %v", bc.Name, OriginalTriggersAnnotation, err)
+		return
+	}
+	if b.Annotations == nil {
+		b.Annotations = map[string]string{}
+	}
+	b.Annotations[OriginalTriggersAnnotation] = string(data)
+}
 
 // canonicalTriggerType normalizes the deprecated lowercase trigger type
 // variants ("github", "generic", "imageChange") to their canonical names.
@@ -37,6 +132,8 @@ func (c *Converter) processTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta
 	if len(bc.Spec.Triggers) == 0 {
 		return
 	}
+
+	c.preserveOriginalTriggers(bc, b)
 
 	seen := map[string]bool{}
 	for _, trigger := range bc.Spec.Triggers {

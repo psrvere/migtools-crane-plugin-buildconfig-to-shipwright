@@ -29,6 +29,7 @@ const (
 
 	ConvertedFromAnnotation    = "crane.konveyor.io/converted-from"
 	BuildRunTemplateAnnotation = "buildconfig-to-shipwright/buildrun-template"
+	OriginalTriggersAnnotation = "buildconfig-to-shipwright/original-triggers"
 
 	ConfigMapsRFE            = "https://issues.redhat.com/browse/BUILD-1745"
 	SecretsRFE               = "https://issues.redhat.com/browse/BUILD-1744"
