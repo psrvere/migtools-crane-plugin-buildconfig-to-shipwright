@@ -130,6 +130,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processSource(bc, b)
 	c.processOutput(bc, b)
 	c.processCompletionDeadline(bc, b)
+	c.processPostCommit(bc)
 	c.addRegistries(b)
 
 	buildUnstructured, err := toUnstructured(b)
