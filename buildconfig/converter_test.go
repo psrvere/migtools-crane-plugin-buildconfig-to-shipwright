@@ -1580,11 +1580,12 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 	sp := func(s string) *string { return &s }
 
 	tests := []struct {
-		name        string
-		buildArgs   []interface{}
-		wantValues  []shipwrightv1beta1.SingleValue // nil => build-args param must be absent
-		wantWarns   []string
-		wantSummary string
+		name         string
+		buildArgs    []interface{}
+		wantValues   []shipwrightv1beta1.SingleValue // nil => build-args param must be absent
+		wantWarns    []string
+		notWantWarns []string
+		wantSummary  string
 	}{
 		{
 			name: "all literal values",
@@ -1596,7 +1597,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 				{Value: sp("GO_VERSION=1.21")},
 				{Value: sp("GOOS=linux")},
 			},
-			wantSummary: "Processed 2 build args: 2 literal, 0 mapped to ConfigMap/Secret refs, 0 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 2 build args: 2 literal, 0 mapped to ConfigMap/Secret refs, 0 skipped",
 		},
 		{
 			name: "configMapKeyRef mapped to ConfigMapValue",
@@ -1608,7 +1609,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 			wantValues: []shipwrightv1beta1.SingleValue{
 				{ConfigMapValue: &shipwrightv1beta1.ObjectKeyRef{Name: "build-config", Key: "version", Format: sp("APP_VERSION=${CONFIGMAP_VALUE}")}},
 			},
-			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped",
 		},
 		{
 			name: "secretKeyRef mapped to SecretValue",
@@ -1620,7 +1621,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 			wantValues: []shipwrightv1beta1.SingleValue{
 				{SecretValue: &shipwrightv1beta1.ObjectKeyRef{Name: "api-secret", Key: "token", Format: sp("API_TOKEN=${SECRET_VALUE}")}},
 			},
-			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped",
 		},
 		{
 			name: "fieldRef skipped with warning",
@@ -1631,7 +1632,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 			},
 			wantValues:  nil,
 			wantWarns:   []string{`"POD_NAME" uses fieldRef/resourceFieldRef`},
-			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
 		},
 		{
 			name: "resourceFieldRef skipped with warning",
@@ -1642,7 +1643,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 			},
 			wantValues:  nil,
 			wantWarns:   []string{`"CPU_LIMIT" uses fieldRef/resourceFieldRef`},
-			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
 		},
 		{
 			name: "mixed literal, refs, and unmappable",
@@ -1664,7 +1665,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 				{SecretValue: &shipwrightv1beta1.ObjectKeyRef{Name: "api-secret", Key: "token", Format: sp("API_TOKEN=${SECRET_VALUE}")}},
 			},
 			wantWarns:   []string{`"POD_NAME" uses fieldRef/resourceFieldRef`},
-			wantSummary: "Processed 4 build args: 1 literal, 2 mapped to ConfigMap/Secret refs, 1 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 4 build args: 1 literal, 2 mapped to ConfigMap/Secret refs, 1 skipped",
 		},
 		{
 			name: "optional configMapKeyRef still mapped but warns",
@@ -1677,7 +1678,108 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 				{ConfigMapValue: &shipwrightv1beta1.ObjectKeyRef{Name: "build-config", Key: "version", Format: sp("APP_VERSION=${CONFIGMAP_VALUE}")}},
 			},
 			wantWarns:   []string{"optional: true"},
-			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped (unmappable ValueFrom)",
+			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped",
+		},
+		{
+			name: "optional secretKeyRef still mapped but warns",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "API_TOKEN", "valueFrom": map[string]interface{}{
+					"secretKeyRef": map[string]interface{}{"name": "api-secret", "key": "token", "optional": true},
+				}},
+			},
+			wantValues: []shipwrightv1beta1.SingleValue{
+				{SecretValue: &shipwrightv1beta1.ObjectKeyRef{Name: "api-secret", Key: "token", Format: sp("API_TOKEN=${SECRET_VALUE}")}},
+			},
+			wantWarns:   []string{"optional: true"},
+			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped",
+		},
+		{
+			name: "explicit optional false does not warn",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "APP_VERSION", "valueFrom": map[string]interface{}{
+					"configMapKeyRef": map[string]interface{}{"name": "build-config", "key": "version", "optional": false},
+				}},
+			},
+			wantValues: []shipwrightv1beta1.SingleValue{
+				{ConfigMapValue: &shipwrightv1beta1.ObjectKeyRef{Name: "build-config", Key: "version", Format: sp("APP_VERSION=${CONFIGMAP_VALUE}")}},
+			},
+			notWantWarns: []string{"optional: true"},
+			wantSummary:  "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped",
+		},
+		{
+			name: "empty valueFrom skipped with accurate warning",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "MYSTERY", "valueFrom": map[string]interface{}{}},
+			},
+			wantValues:   nil,
+			wantWarns:    []string{`"MYSTERY" has an empty or unsupported valueFrom source`},
+			notWantWarns: []string{"fieldRef/resourceFieldRef"},
+			wantSummary:  "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
+		},
+		{
+			name: "both value and valueFrom warns and prefers valueFrom",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "APP_VERSION", "value": "stale", "valueFrom": map[string]interface{}{
+					"configMapKeyRef": map[string]interface{}{"name": "build-config", "key": "version"},
+				}},
+			},
+			wantValues: []shipwrightv1beta1.SingleValue{
+				{ConfigMapValue: &shipwrightv1beta1.ObjectKeyRef{Name: "build-config", Key: "version", Format: sp("APP_VERSION=${CONFIGMAP_VALUE}")}},
+			},
+			wantWarns:   []string{"sets both value and valueFrom"},
+			wantSummary: "Processed 1 build args: 0 literal, 1 mapped to ConfigMap/Secret refs, 0 skipped",
+		},
+		{
+			name: "empty name skipped with warning",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "", "value": "oops"},
+			},
+			wantValues:  nil,
+			wantWarns:   []string{`invalid name ""`},
+			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
+		},
+		{
+			name: "name with invalid characters skipped with warning",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "BAD=NAME", "value": "oops"},
+			},
+			wantValues:  nil,
+			wantWarns:   []string{`invalid name "BAD=NAME"`},
+			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
+		},
+		{
+			name: "configMapKeyRef with missing key skipped with warning",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "APP_VERSION", "valueFrom": map[string]interface{}{
+					"configMapKeyRef": map[string]interface{}{"name": "build-config"},
+				}},
+			},
+			wantValues:  nil,
+			wantWarns:   []string{`"APP_VERSION" references a ConfigMap with an empty name or key`},
+			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
+		},
+		{
+			name: "secretKeyRef with missing name skipped with warning",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "API_TOKEN", "valueFrom": map[string]interface{}{
+					"secretKeyRef": map[string]interface{}{"key": "token"},
+				}},
+			},
+			wantValues:  nil,
+			wantWarns:   []string{`"API_TOKEN" references a Secret with an empty name or key`},
+			wantSummary: "Processed 1 build args: 0 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
+		},
+		{
+			name: "invalid name does not block remaining args",
+			buildArgs: []interface{}{
+				map[string]interface{}{"name": "BAD NAME", "value": "oops"},
+				map[string]interface{}{"name": "BASE", "value": "alpine"},
+			},
+			wantValues: []shipwrightv1beta1.SingleValue{
+				{Value: sp("BASE=alpine")},
+			},
+			wantWarns:   []string{`invalid name "BAD NAME"`},
+			wantSummary: "Processed 2 build args: 1 literal, 0 mapped to ConfigMap/Secret refs, 1 skipped",
 		},
 	}
 
@@ -1729,8 +1831,31 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 					t.Errorf("expected log containing %q; logs:\n%s", w, joined)
 				}
 			}
+			for _, w := range tt.notWantWarns {
+				if strings.Contains(joined, w) {
+					t.Errorf("unexpected log containing %q; logs:\n%s", w, joined)
+				}
+			}
 			if tt.wantSummary != "" && !strings.Contains(joined, tt.wantSummary) {
 				t.Errorf("expected summary log %q; logs:\n%s", tt.wantSummary, joined)
+			}
+
+			// D2: every build-arg warning must also be recorded on the
+			// converted Build via the conversion-warnings annotation, and
+			// warning-free conversions must not carry the annotation.
+			ann := b.Annotations[ConversionWarningsAnnotation]
+			if len(tt.wantWarns) == 0 && ann != "" {
+				t.Errorf("unexpected %s annotation: %q", ConversionWarningsAnnotation, ann)
+			}
+			for _, w := range tt.wantWarns {
+				if !strings.Contains(ann, w) {
+					t.Errorf("expected annotation %s to contain %q; got %q", ConversionWarningsAnnotation, w, ann)
+				}
+			}
+			for _, w := range tt.notWantWarns {
+				if strings.Contains(ann, w) {
+					t.Errorf("unexpected %q in %s annotation: %q", w, ConversionWarningsAnnotation, ann)
+				}
 			}
 		})
 	}
