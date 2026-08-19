@@ -734,37 +734,51 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 	// Step names must match the referenced ClusterBuildStrategy. Verified on
 	// cluster (OpenShift Builds operator 1.8.1): buildah has a single
 	// "build-and-push" step; source-to-image runs "s2i-generate" + "buildah".
+	// When the strategy has been overridden to a custom ClusterBuildStrategy
+	// via strategy mapping, its step names are unknown — emitting the default
+	// names would make Shipwright reject the BuildRun at admission, so
+	// stepResources are omitted and the user is told to fill them in.
 	var stepNames []string
 	switch bc.Spec.Strategy.Type {
 	case buildv1.DockerBuildStrategyType:
-		stepNames = []string{"build-and-push"}
+		if b.Spec.Strategy.Name == defaultDockerStrategy {
+			stepNames = []string{"build-and-push"}
+		}
 	case buildv1.SourceBuildStrategyType:
-		stepNames = []string{"s2i-generate", "buildah"}
+		if b.Spec.Strategy.Name == defaultS2IStrategy {
+			stepNames = []string{"s2i-generate", "buildah"}
+		}
 	default:
 		return nil
 	}
 
-	stepResources := make([]map[string]interface{}, 0, len(stepNames))
+	// The spec is built from Shipwright typed structs so field names cannot
+	// drift from the API, then embedded in a minimal hand-built envelope so
+	// the template YAML stays free of marshaling artifacts such as
+	// "creationTimestamp: null" and "status: {}".
+	spec := shipwrightv1beta1.BuildRunSpec{
+		Build: shipwrightv1beta1.ReferencedBuild{Name: &b.Name},
+	}
+	if generatedSA != "" {
+		sa := generatedSA
+		spec.ServiceAccount = &sa
+	}
 	for _, step := range stepNames {
-		stepResources = append(stepResources, map[string]interface{}{
-			"name":      step,
-			"resources": res,
+		spec.StepResources = append(spec.StepResources, shipwrightv1beta1.StepResourceOverride{
+			Name:      step,
+			Resources: res,
 		})
 	}
 
-	spec := map[string]interface{}{
-		"build": map[string]interface{}{
-			"name": b.Name,
-		},
-		"stepResources": stepResources,
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("error marshaling BuildRun spec for BuildConfig %s: %w", bc.Name, err)
 	}
-	if generatedSA != "" {
-		spec["serviceAccount"] = generatedSA
+	specMap := map[string]interface{}{}
+	if err := json.Unmarshal(specJSON, &specMap); err != nil {
+		return fmt.Errorf("error unmarshaling BuildRun spec for BuildConfig %s: %w", bc.Name, err)
 	}
 
-	// Built as a plain map rather than shipwright typed structs so the
-	// template YAML stays free of marshaling artifacts such as
-	// "creationTimestamp: null" and "status: {}".
 	template := map[string]interface{}{
 		"apiVersion": "shipwright.io/v1beta1",
 		"kind":       "BuildRun",
@@ -772,7 +786,7 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 			"name":      b.Name + "-buildrun",
 			"namespace": b.Namespace,
 		},
-		"spec": spec,
+		"spec": specMap,
 	}
 
 	templateYAML, err := yaml.Marshal(template)
@@ -781,6 +795,11 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 	}
 
 	b.Annotations[BuildRunTemplateAnnotation] = string(templateYAML)
+
+	if len(stepNames) == 0 {
+		c.Log.Warnf("Build strategy %q is a custom mapping with unknown step names — stepResources were omitted from the BuildRun template in annotation %s. Add stepResources entries matching the strategy's step names to carry over the BuildConfig resource requirements (requests: %v, limits: %v).", b.Spec.Strategy.Name, BuildRunTemplateAnnotation, res.Requests, res.Limits)
+		return nil
+	}
 
 	c.Log.Infof("Generated BuildRun template with resource requirements (requests: %v, limits: %v) in annotation %s", res.Requests, res.Limits, BuildRunTemplateAnnotation)
 	c.Log.Warnf("Resource requirements are not supported on Shipwright Build. Apply the BuildRun template from annotation %s (after review) or set stepResources on each BuildRun you create.", BuildRunTemplateAnnotation)

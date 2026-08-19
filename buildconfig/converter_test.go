@@ -13,7 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 )
@@ -1536,25 +1535,16 @@ func TestConvertNoOutputImage(t *testing.T) {
 	}
 }
 
-// buildRunTemplate mirrors the YAML structure of the BuildRun template
-// annotation (BUILD-2261) for assertions.
-type buildRunTemplate struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Metadata   struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-	} `json:"metadata"`
-	Spec struct {
-		Build struct {
-			Name string `json:"name"`
-		} `json:"build"`
-		ServiceAccount string `json:"serviceAccount"`
-		StepResources  []struct {
-			Name      string                      `json:"name"`
-			Resources corev1.ResourceRequirements `json:"resources"`
-		} `json:"stepResources"`
-	} `json:"spec"`
+// unmarshalBuildRunTemplate decodes the BuildRun template annotation
+// (BUILD-2261) into the real Shipwright type so the assertions round-trip
+// through the same API the target cluster will use.
+func unmarshalBuildRunTemplate(t *testing.T, value string) shipwrightv1beta1.BuildRun {
+	t.Helper()
+	tmpl := shipwrightv1beta1.BuildRun{}
+	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
+		t.Fatalf("annotation value is not a valid BuildRun: %v\n%s", err, value)
+	}
+	return tmpl
 }
 
 func runBuildRunTemplateConversion(t *testing.T, spec map[string]interface{}) map[string]string {
@@ -1602,10 +1592,7 @@ func TestConvertResourcesDockerStrategy(t *testing.T) {
 		t.Fatalf("expected annotation %s, got: %v", BuildRunTemplateAnnotation, annotations)
 	}
 
-	tmpl := buildRunTemplate{}
-	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
-		t.Fatalf("annotation value is not valid YAML: %v\n%s", err, value)
-	}
+	tmpl := unmarshalBuildRunTemplate(t, value)
 
 	if tmpl.APIVersion != "shipwright.io/v1beta1" {
 		t.Errorf("expected apiVersion shipwright.io/v1beta1, got %s", tmpl.APIVersion)
@@ -1613,17 +1600,17 @@ func TestConvertResourcesDockerStrategy(t *testing.T) {
 	if tmpl.Kind != "BuildRun" {
 		t.Errorf("expected kind BuildRun, got %s", tmpl.Kind)
 	}
-	if tmpl.Metadata.Name != "myapp-buildrun" {
-		t.Errorf("expected metadata.name myapp-buildrun, got %s", tmpl.Metadata.Name)
+	if tmpl.Name != "myapp-buildrun" {
+		t.Errorf("expected metadata.name myapp-buildrun, got %s", tmpl.Name)
 	}
-	if tmpl.Metadata.Namespace != "myns" {
-		t.Errorf("expected metadata.namespace myns, got %s", tmpl.Metadata.Namespace)
+	if tmpl.Namespace != "myns" {
+		t.Errorf("expected metadata.namespace myns, got %s", tmpl.Namespace)
 	}
-	if tmpl.Spec.Build.Name != "myapp" {
-		t.Errorf("expected spec.build.name myapp, got %s", tmpl.Spec.Build.Name)
+	if tmpl.Spec.Build.Name == nil || *tmpl.Spec.Build.Name != "myapp" {
+		t.Errorf("expected spec.build.name myapp, got %v", tmpl.Spec.Build.Name)
 	}
-	if tmpl.Spec.ServiceAccount != "" {
-		t.Errorf("expected no serviceAccount, got %s", tmpl.Spec.ServiceAccount)
+	if tmpl.Spec.ServiceAccount != nil {
+		t.Errorf("expected no serviceAccount, got %s", *tmpl.Spec.ServiceAccount)
 	}
 	if len(tmpl.Spec.StepResources) != 1 {
 		t.Fatalf("expected 1 stepResources entry, got %d", len(tmpl.Spec.StepResources))
@@ -1666,14 +1653,11 @@ func TestConvertResourcesSourceStrategyWithServiceAccount(t *testing.T) {
 		t.Fatalf("expected annotation %s, got: %v", BuildRunTemplateAnnotation, annotations)
 	}
 
-	tmpl := buildRunTemplate{}
-	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
-		t.Fatalf("annotation value is not valid YAML: %v\n%s", err, value)
-	}
+	tmpl := unmarshalBuildRunTemplate(t, value)
 
 	// Generated ServiceAccount (pull-secret flow) must be referenced.
-	if tmpl.Spec.ServiceAccount != "myapp" {
-		t.Errorf("expected serviceAccount myapp, got %q", tmpl.Spec.ServiceAccount)
+	if tmpl.Spec.ServiceAccount == nil || *tmpl.Spec.ServiceAccount != "myapp" {
+		t.Errorf("expected serviceAccount myapp, got %v", tmpl.Spec.ServiceAccount)
 	}
 
 	if len(tmpl.Spec.StepResources) != 2 {
@@ -1713,10 +1697,7 @@ func TestConvertResourcesRequestsOnly(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected annotation %s for requests-only resources", BuildRunTemplateAnnotation)
 	}
-	tmpl := buildRunTemplate{}
-	if err := yaml.Unmarshal([]byte(value), &tmpl); err != nil {
-		t.Fatalf("annotation value is not valid YAML: %v", err)
-	}
+	tmpl := unmarshalBuildRunTemplate(t, value)
 	if tmpl.Spec.StepResources[0].Resources.Requests.Cpu().String() != "250m" {
 		t.Errorf("unexpected requests: %v", tmpl.Spec.StepResources[0].Resources.Requests)
 	}
