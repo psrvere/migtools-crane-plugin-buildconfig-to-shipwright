@@ -10,7 +10,7 @@ https://github.com/konveyor/enhancements/pull/300
 
 ## Related repositories
 
-- **crane-lib** (`github.com/konveyor/crane-lib`) — provides the plugin interface (`transform.Plugin`), CLI harness (`transform/cli`), and types (`PluginRequest`, `PluginResponse`). This plugin requires an unreleased version of crane-lib that includes the `NewResources` field in `PluginResponse` (see `replace` directive in `go.mod`).
+- **crane-lib** (`github.com/konveyor/crane-lib`) — provides the plugin interface (`transform.Plugin`), CLI harness (`transform/cli`), and types (`PluginRequest`, `PluginResponse`). This plugin needs the `NewResources` field in `PluginResponse`, which is pinned in `go.mod` to the published pseudo-version `v0.1.6-0.20260807130033-222a325c7cee`. There is no `replace` directive — the module builds standalone.
 - **crane-plugin-openshift** (`github.com/migtools/crane-plugin-openshift`) — the reference crane transform plugin this project follows architecturally.
 - **crane-lib/convert/** — the original `crane convert` implementation this plugin ports from. It required live cluster access; this plugin works offline.
 
@@ -36,7 +36,7 @@ The original `crane convert` resolved ImageStreamTag/ImageStreamImage references
 GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-shipwright .
 ```
 
-Requires Go 1.26+ (forced by transitive dependencies). The `replace` directive in `go.mod` points to the local `../crane-lib` for the unreleased `NewResources` API — update this when crane-lib publishes a new release.
+Requires Go 1.26+ (forced by transitive dependencies). crane-lib is pinned to a published pseudo-version for the `NewResources` API; no sibling `../crane-lib` checkout is required, so `GOWORK=off go build ./...` works from a clean clone.
 
 ## Testing
 
