@@ -23,6 +23,14 @@ spec:
           value: "1.21"
         - name: BASE_IMAGE
           value: "registry.access.redhat.com/ubi8/ubi-minimal:latest"
+      volumes:
+        - name: build-certs
+          source:
+            type: Secret
+            secret:
+              secretName: build-certs
+          mounts:
+            - destinationPath: /etc/pki/ca-trust/source/anchors
   output:
     to:
       kind: DockerImage

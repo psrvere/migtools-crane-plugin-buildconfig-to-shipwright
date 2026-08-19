@@ -1533,3 +1533,165 @@ func TestConvertNoOutputImage(t *testing.T) {
 		})
 	}
 }
+
+// registriesBuildConfigRequest builds a minimal Docker-strategy BuildConfig request with
+// the given registry extras, for exercising addRegistries edge cases.
+func registriesBuildConfigRequest(extras map[string]string) transform.PluginRequest {
+	return transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata": map[string]interface{}{
+				"name":      "registries-app",
+				"namespace": "myns",
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Git",
+					"git":  map[string]interface{}{"uri": "https://example.com/repo.git"},
+				},
+				"strategy": map[string]interface{}{
+					"type":           "Docker",
+					"dockerStrategy": map[string]interface{}{},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{
+						"kind": "DockerImage",
+						"name": "quay.io/example/myapp:latest",
+					},
+				},
+			},
+		}},
+		Extras: extras,
+	}
+}
+
+// paramValuesByName indexes a Build's paramValues for assertion.
+func paramValuesByName(b *shipwrightv1beta1.Build) map[string]shipwrightv1beta1.ParamValue {
+	byName := map[string]shipwrightv1beta1.ParamValue{}
+	for _, pv := range b.Spec.ParamValues {
+		byName[pv.Name] = pv
+	}
+	return byName
+}
+
+// TestConvertRegistryParamsEdgeCases pins down what addRegistries does with malformed
+// registry lists. ParseOptionalFieldSliceVal is a bare strings.Split on "," with no
+// trimming and no empty-entry filtering, so blank and whitespace-padded entries reach
+// spec.paramValues verbatim and end up in the strategy's registries.conf.
+//
+// The empty-string and whitespace cases below therefore assert CURRENT behaviour, not
+// desired behaviour — they are characterization tests. See BUILD-2339, which added the
+// equivalent guard to applyRegistryMapping; addRegistries has no such guard yet.
+func TestConvertRegistryParamsEdgeCases(t *testing.T) {
+	tests := []struct {
+		name       string
+		extras     map[string]string
+		wantParams map[string][]string // param name → expected values; absent key = param must not be emitted
+	}{
+		{
+			name:       "no registry extras emits no registry params",
+			extras:     map[string]string{},
+			wantParams: map[string][]string{},
+		},
+		{
+			name: "empty strings are ignored entirely",
+			extras: map[string]string{
+				SearchRegistriesFlag:   "",
+				InsecureRegistriesFlag: "",
+				BlockRegistriesFlag:    "",
+			},
+			wantParams: map[string][]string{},
+		},
+		{
+			name:   "single value per list",
+			extras: map[string]string{SearchRegistriesFlag: "docker.io"},
+			wantParams: map[string][]string{
+				"registries-search": {"docker.io"},
+			},
+		},
+		{
+			// Characterization: the empty entry between the commas survives.
+			name:   "blank entry between commas leaks an empty value",
+			extras: map[string]string{SearchRegistriesFlag: "docker.io,,quay.io"},
+			wantParams: map[string][]string{
+				"registries-search": {"docker.io", "", "quay.io"},
+			},
+		},
+		{
+			// Characterization: surrounding whitespace is not trimmed.
+			name:   "surrounding whitespace is preserved verbatim",
+			extras: map[string]string{InsecureRegistriesFlag: " my-registry.local:5000 , other.local "},
+			wantParams: map[string][]string{
+				"registries-insecure": {" my-registry.local:5000 ", " other.local "},
+			},
+		},
+		{
+			// Characterization: a lone comma yields two empty values, not zero.
+			name:   "lone comma yields two empty values",
+			extras: map[string]string{BlockRegistriesFlag: ","},
+			wantParams: map[string][]string{
+				"registries-block": {"", ""},
+			},
+		},
+		{
+			name: "all three lists are emitted independently",
+			extras: map[string]string{
+				SearchRegistriesFlag:   "docker.io,quay.io",
+				InsecureRegistriesFlag: "my-registry.local:5000",
+				BlockRegistriesFlag:    "blocked.io",
+			},
+			wantParams: map[string][]string{
+				"registries-search":   {"docker.io", "quay.io"},
+				"registries-insecure": {"my-registry.local:5000"},
+				"registries-block":    {"blocked.io"},
+			},
+		},
+	}
+
+	registryParams := []string{"registries-search", "registries-insecure", "registries-block"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+
+			resp, err := plugin.Run(registriesBuildConfigRequest(tt.extras))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			b := decodeBuild(t, resp)
+			byName := paramValuesByName(b)
+
+			for _, name := range registryParams {
+				param, present := byName[name]
+				want, wanted := tt.wantParams[name]
+
+				if !wanted {
+					if present {
+						t.Errorf("param %q should not be emitted, got %+v", name, param.Values)
+					}
+					continue
+				}
+
+				if !present {
+					t.Fatalf("missing param %q", name)
+				}
+				if len(param.Values) != len(want) {
+					t.Fatalf("param %q: expected %d values %q, got %d: %+v",
+						name, len(want), want, len(param.Values), param.Values)
+				}
+				for i, wantVal := range want {
+					got := param.Values[i]
+					if got.Value == nil {
+						t.Errorf("param %q value %d: expected %q, got nil", name, i, wantVal)
+						continue
+					}
+					if *got.Value != wantVal {
+						t.Errorf("param %q value %d: expected %q, got %q", name, i, wantVal, *got.Value)
+					}
+				}
+			}
+		})
+	}
+}

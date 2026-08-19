@@ -22,6 +22,14 @@ spec:
       env:
         - name: NPM_MIRROR
           value: https://registry.npmjs.org
+      volumes:
+        - name: app-config
+          source:
+            type: ConfigMap
+            configMap:
+              name: app-config
+          mounts:
+            - destinationPath: /etc/app-config
   output:
     to:
       kind: ImageStreamTag
