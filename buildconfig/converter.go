@@ -710,8 +710,8 @@ func (c *Converter) processSuccessfulBuildsHistoryLimit(bc *buildv1.BuildConfig,
 
 	v := *bc.Spec.SuccessfulBuildsHistoryLimit
 	if v < minSucceededLimit || v > maxSucceededLimit {
-		c.Log.Warnf("successfulBuildsHistoryLimit %d on BuildConfig %s is outside the Shipwright retention.succeededLimit range [%d,%d]; leaving retention unset — migrated BuildRuns will not be auto-pruned",
-			v, bc.Name, minSucceededLimit, maxSucceededLimit)
+		c.Log.Warnf("successfulBuildsHistoryLimit %d on BuildConfig %s/%s is outside the Shipwright retention.succeededLimit range [%d,%d]; leaving retention unset — migrated BuildRuns will not be auto-pruned",
+			v, bc.Namespace, bc.Name, minSucceededLimit, maxSucceededLimit)
 		return
 	}
 
@@ -720,8 +720,8 @@ func (c *Converter) processSuccessfulBuildsHistoryLimit(bc *buildv1.BuildConfig,
 		b.Spec.Retention = &shipwrightv1beta1.BuildRetention{}
 	}
 	b.Spec.Retention.SucceededLimit = &limit
-	c.Log.Infof("Mapping successfulBuildsHistoryLimit %d to Build retention.succeededLimit for BuildConfig %s (OpenShift pruned old Build objects; Shipwright will prune BuildRuns)",
-		v, bc.Name)
+	c.Log.Infof("Mapping successfulBuildsHistoryLimit %d to Build retention.succeededLimit for BuildConfig %s/%s (OpenShift pruned old Build objects; Shipwright will prune BuildRuns)",
+		v, bc.Namespace, bc.Name)
 }
 
 func (c *Converter) addRegistries(b *shipwrightv1beta1.Build) {
