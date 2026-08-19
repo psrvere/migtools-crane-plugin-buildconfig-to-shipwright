@@ -208,17 +208,51 @@ func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwright
 		})
 	}
 
-	// BuildArgs
+	// BuildArgs — literal values pass through as NAME=VALUE; ConfigMap/Secret
+	// backed args map to Shipwright's native ObjectKeyRef resolution (resolved
+	// at BuildRun time); fieldRef/resourceFieldRef have no Shipwright
+	// equivalent and are skipped with a warning.
 	if len(ds.BuildArgs) > 0 {
 		values := []shipwrightv1beta1.SingleValue{}
+		literal, mapped, skipped := 0, 0, 0
 		for _, arg := range ds.BuildArgs {
-			envNameValue := arg.Name + "=" + arg.Value
-			values = append(values, shipwrightv1beta1.SingleValue{Value: &envNameValue})
+			switch {
+			case arg.ValueFrom == nil:
+				envNameValue := arg.Name + "=" + arg.Value
+				values = append(values, shipwrightv1beta1.SingleValue{Value: &envNameValue})
+				literal++
+			case arg.ValueFrom.ConfigMapKeyRef != nil:
+				ref := arg.ValueFrom.ConfigMapKeyRef
+				if ref.Optional != nil && *ref.Optional {
+					c.Log.Warnf("Build arg %q references ConfigMap %q key %q with optional: true — Shipwright has no 'optional' equivalent; a missing key will fail the BuildRun.", arg.Name, ref.Name, ref.Key)
+				}
+				format := arg.Name + "=${CONFIGMAP_VALUE}"
+				values = append(values, shipwrightv1beta1.SingleValue{
+					ConfigMapValue: &shipwrightv1beta1.ObjectKeyRef{Name: ref.Name, Key: ref.Key, Format: &format},
+				})
+				mapped++
+			case arg.ValueFrom.SecretKeyRef != nil:
+				ref := arg.ValueFrom.SecretKeyRef
+				if ref.Optional != nil && *ref.Optional {
+					c.Log.Warnf("Build arg %q references Secret %q key %q with optional: true — Shipwright has no 'optional' equivalent; a missing key will fail the BuildRun.", arg.Name, ref.Name, ref.Key)
+				}
+				format := arg.Name + "=${SECRET_VALUE}"
+				values = append(values, shipwrightv1beta1.SingleValue{
+					SecretValue: &shipwrightv1beta1.ObjectKeyRef{Name: ref.Name, Key: ref.Key, Format: &format},
+				})
+				mapped++
+			default:
+				c.Log.Warnf("Build arg %q uses fieldRef/resourceFieldRef which has no Shipwright equivalent. This build arg was skipped — set it manually in the generated Build.", arg.Name)
+				skipped++
+			}
 		}
-		b.Spec.ParamValues = append(b.Spec.ParamValues, shipwrightv1beta1.ParamValue{
-			Name:   "build-args",
-			Values: values,
-		})
+		if len(values) > 0 {
+			b.Spec.ParamValues = append(b.Spec.ParamValues, shipwrightv1beta1.ParamValue{
+				Name:   "build-args",
+				Values: values,
+			})
+		}
+		c.Log.Infof("Processed %d build args: %d literal, %d mapped to ConfigMap/Secret refs, %d skipped (unmappable ValueFrom)", len(ds.BuildArgs), literal, mapped, skipped)
 	}
 
 	// ImageOptimizationPolicy (squash)
