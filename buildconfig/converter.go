@@ -130,6 +130,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processSource(bc, b)
 	c.processOutput(bc, b)
 	c.processCompletionDeadline(bc, b)
+	c.processRunPolicy(bc)
 	c.addRegistries(b)
 
 	buildUnstructured, err := toUnstructured(b)
@@ -687,6 +688,34 @@ func (c *Converter) processCompletionDeadline(bc *buildv1.BuildConfig, b *shipwr
 	b.Spec.Timeout = &timeout
 	c.Log.Infof("Mapping completionDeadlineSeconds %ds to Build timeout %s for BuildConfig %s",
 		seconds, timeout.Duration, bc.Name)
+}
+
+// processRunPolicy reports the build scheduling behaviour that is lost during
+// conversion. Shipwright has no equivalent of runPolicy: BuildRuns are independent
+// objects that run concurrently, with no queue, no ordering and no cancellation of
+// superseded runs. Parallel is the one policy Shipwright already matches.
+func (c *Converter) processRunPolicy(bc *buildv1.BuildConfig) {
+	// An absent runPolicy still meant Serial scheduling in OpenShift, so the
+	// behaviour lost on conversion is the same as an explicit Serial.
+	policy := bc.Spec.RunPolicy
+	if policy == "" {
+		policy = buildv1.BuildRunPolicySerial
+	}
+
+	switch policy {
+	case buildv1.BuildRunPolicyParallel:
+		c.Log.Infof("BuildConfig %s uses runPolicy %q; Shipwright BuildRuns already run independently and concurrently, so build scheduling is unchanged",
+			bc.Name, policy)
+	case buildv1.BuildRunPolicySerial:
+		c.Log.Warnf("BuildConfig %s uses runPolicy %q, which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag",
+			bc.Name, policy)
+	case buildv1.BuildRunPolicySerialLatestOnly:
+		c.Log.Warnf("BuildConfig %s uses runPolicy %q, which is dropped: OpenShift queued its builds and cancelled superseded ones so that only the latest ran, but Shipwright BuildRuns run concurrently and are never auto-cancelled. Serialize the runs and cancel superseded ones in your CI/CD pipeline if you depend on this",
+			bc.Name, policy)
+	default:
+		c.Log.Warnf("BuildConfig %s uses unrecognized runPolicy %q, which is dropped: Shipwright has no build scheduling policy and BuildRuns run concurrently",
+			bc.Name, policy)
+	}
 }
 
 func (c *Converter) addRegistries(b *shipwrightv1beta1.Build) {

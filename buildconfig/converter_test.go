@@ -1533,3 +1533,132 @@ func TestConvertNoOutputImage(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessRunPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		runPolicy  buildv1.BuildRunPolicy
+		wantLevel  logrus.Level
+		wantPhrase string
+	}{
+		{
+			name:       "absent runPolicy is treated as Serial",
+			runPolicy:  "",
+			wantLevel:  logrus.WarnLevel,
+			wantPhrase: `uses runPolicy "Serial", which is dropped`,
+		},
+		{
+			name:       "Serial warns that queuing is lost",
+			runPolicy:  buildv1.BuildRunPolicySerial,
+			wantLevel:  logrus.WarnLevel,
+			wantPhrase: `uses runPolicy "Serial", which is dropped`,
+		},
+		{
+			name:       "SerialLatestOnly warns that queuing and cancellation are lost",
+			runPolicy:  buildv1.BuildRunPolicySerialLatestOnly,
+			wantLevel:  logrus.WarnLevel,
+			wantPhrase: "never auto-cancelled",
+		},
+		{
+			name:       "Parallel is preserved so it only logs at info",
+			runPolicy:  buildv1.BuildRunPolicyParallel,
+			wantLevel:  logrus.InfoLevel,
+			wantPhrase: "build scheduling is unchanged",
+		},
+		{
+			name:       "unrecognized policy warns",
+			runPolicy:  buildv1.BuildRunPolicy("SomethingElse"),
+			wantLevel:  logrus.WarnLevel,
+			wantPhrase: `unrecognized runPolicy "SomethingElse"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, hook := logrustest.NewNullLogger()
+			c := &Converter{Log: logger}
+			bc := &buildv1.BuildConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "policy-app", Namespace: "myns"},
+				Spec:       buildv1.BuildConfigSpec{RunPolicy: tt.runPolicy},
+			}
+
+			c.processRunPolicy(bc)
+
+			entries := hook.AllEntries()
+			if len(entries) != 1 {
+				t.Fatalf("expected exactly 1 log entry, got %d", len(entries))
+			}
+			entry := entries[0]
+			if entry.Level != tt.wantLevel {
+				t.Errorf("level = %v, want %v (message: %s)", entry.Level, tt.wantLevel, entry.Message)
+			}
+			if !strings.Contains(entry.Message, tt.wantPhrase) {
+				t.Errorf("message = %q, want it to contain %q", entry.Message, tt.wantPhrase)
+			}
+			if !strings.Contains(entry.Message, "policy-app") {
+				t.Errorf("message = %q, want it to name the BuildConfig", entry.Message)
+			}
+		})
+	}
+}
+
+func TestConvertRunPolicyWiring(t *testing.T) {
+	tests := []struct {
+		name     string
+		strategy map[string]interface{}
+		wantLog  bool
+	}{
+		{
+			name:     "converted BuildConfig reports the dropped runPolicy",
+			strategy: map[string]interface{}{"type": "Docker", "dockerStrategy": map[string]interface{}{}},
+			wantLog:  true,
+		},
+		{
+			name:     "pass-through BuildConfig stays silent about runPolicy",
+			strategy: map[string]interface{}{"type": "Custom", "customStrategy": map[string]interface{}{}},
+			wantLog:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, hook := logrustest.NewNullLogger()
+			plugin := &BuildConfigTransformPlugin{Log: logger}
+			request := transform.PluginRequest{
+				Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "build.openshift.io/v1",
+					"kind":       "BuildConfig",
+					"metadata": map[string]interface{}{
+						"name":      "policy-app",
+						"namespace": "myns",
+					},
+					"spec": map[string]interface{}{
+						"runPolicy": "Serial",
+						"source": map[string]interface{}{
+							"type": "Git",
+							"git":  map[string]interface{}{"uri": "https://example.com/repo.git"},
+						},
+						"strategy": tt.strategy,
+						"output": map[string]interface{}{
+							"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/app:latest"},
+						},
+					},
+				}},
+			}
+
+			if _, err := plugin.Run(request); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got := false
+			for _, entry := range hook.AllEntries() {
+				if strings.Contains(entry.Message, "runPolicy") {
+					got = true
+				}
+			}
+			if got != tt.wantLog {
+				t.Errorf("runPolicy log emitted = %v, want %v", got, tt.wantLog)
+			}
+		})
+	}
+}
