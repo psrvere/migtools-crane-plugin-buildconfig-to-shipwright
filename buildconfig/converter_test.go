@@ -1581,6 +1581,9 @@ func TestConvertResourcesDockerStrategy(t *testing.T) {
 			"type":           "Docker",
 			"dockerStrategy": map[string]interface{}{},
 		},
+		"output": map[string]interface{}{
+			"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
+		},
 		"resources": map[string]interface{}{
 			"requests": map[string]interface{}{"cpu": "500m", "memory": "1Gi"},
 			"limits":   map[string]interface{}{"cpu": "2", "memory": "4Gi"},
@@ -1643,6 +1646,9 @@ func TestConvertResourcesSourceStrategyWithServiceAccount(t *testing.T) {
 				"pullSecret": map[string]interface{}{"name": "my-pull-secret"},
 			},
 		},
+		"output": map[string]interface{}{
+			"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
+		},
 		"resources": map[string]interface{}{
 			"limits": map[string]interface{}{"memory": "2Gi"},
 		},
@@ -1688,6 +1694,9 @@ func TestConvertResourcesRequestsOnly(t *testing.T) {
 			"type":           "Docker",
 			"dockerStrategy": map[string]interface{}{},
 		},
+		"output": map[string]interface{}{
+			"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
+		},
 		"resources": map[string]interface{}{
 			"requests": map[string]interface{}{"cpu": "250m"},
 		},
@@ -1717,6 +1726,9 @@ func TestConvertResourcesEmptyNoAnnotation(t *testing.T) {
 				"type":           "Docker",
 				"dockerStrategy": map[string]interface{}{},
 			},
+			"output": map[string]interface{}{
+				"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
+			},
 		},
 		"empty resources": {
 			"source": map[string]interface{}{
@@ -1726,6 +1738,9 @@ func TestConvertResourcesEmptyNoAnnotation(t *testing.T) {
 			"strategy": map[string]interface{}{
 				"type":           "Docker",
 				"dockerStrategy": map[string]interface{}{},
+			},
+			"output": map[string]interface{}{
+				"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
 			},
 			"resources": map[string]interface{}{},
 		},
@@ -1761,6 +1776,7 @@ func TestConvertResourcesLogsWarning(t *testing.T) {
 		"spec": {
 			"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
 			"strategy": {"type": "Docker", "dockerStrategy": {}},
+			"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/myapp:latest"}},
 			"resources": {"limits": {"memory": "4Gi"}}
 		}
 	}`
@@ -1829,6 +1845,7 @@ func TestConvertResourcesCustomStrategyOmitsStepResources(t *testing.T) {
 				"spec": {
 					"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
 					"strategy": ` + tt.strategyJSON + `,
+					"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/myapp:latest"}},
 					"resources": {"requests": {"cpu": "250m"}, "limits": {"memory": "4Gi"}}
 				}
 			}`
