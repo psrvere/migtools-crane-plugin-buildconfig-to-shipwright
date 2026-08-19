@@ -67,7 +67,37 @@ register until you provide a strategy copy that does.
        mountPath: /etc/npm
    ```
 
-4. **Point the Build at your copy**:
+4. **Expose the mount to the Dockerfile's `RUN` steps.** The step
+   `volumeMount` from step 3 only makes the files visible to the `buildah`
+   *process* — they are **not** inside the container that `RUN` executes in.
+   Add a bind to the `bud` invocation in your strategy copy, and it **must end
+   in `:ro`**:
+
+   ```sh
+   # in the build step's script (the `buildah` step for source-to-image)
+   buildah --storage-driver=$(params.storage-driver) \
+     bud "${budArgs[@]}" \
+     --volume /etc/npm:/etc/npm:ro \
+     --registries-conf=/tmp/registries.conf \
+     --tag="${image}" \
+     --file="${dockerfile}" \
+     .
+   ```
+
+   Without `:ro` the build fails at the first `RUN` that touches the path:
+
+   ```
+   remounting "/var/tmp/buildah.../mnt/rootfs/etc/npm" in mount namespace
+   with flags [] instead of [ST_RDONLY]: permission denied
+   ```
+
+   Secret and ConfigMap volumes are mounted read-only (tmpfs) by Kubernetes.
+   Unprivileged `buildah` (OpenShift `pipelines-scc`) cannot remount a
+   read-only source read-write, so the bind flags have to match the source.
+   Both shipped strategies end in `buildah bud`, so this applies to `buildah`
+   and `source-to-image` alike.
+
+5. **Point the Build at your copy**:
 
    ```yaml
    spec:
@@ -76,7 +106,7 @@ register until you provide a strategy copy that does.
        name: buildah-with-volumes
    ```
 
-5. **Re-apply.** Existing Builds only re-validate on a spec change
+6. **Re-apply.** Existing Builds only re-validate on a spec change
    (generation-based reconcile) — touch the Build spec or recreate it after a
    strategy update.
 
@@ -84,8 +114,9 @@ register until you provide a strategy copy that does.
 
 - If both `Build` and `BuildRun` override the same volume, the `BuildRun`
   value wins.
-- Docker builds: files mounted this way exist in the build container at the
-  mounted path only; have the Dockerfile `RUN cp`/read from that path instead
-  of `ADD`/`COPY` from the build context.
+- Docker builds: the files are visible to `RUN` only at the mounted path (see
+  step 4) and are not part of the build context — have the Dockerfile
+  `RUN cp`/read from that path instead of `ADD`/`COPY`. As with BuildConfig
+  build volumes, they are not persisted into the output image.
 - Volumes that many users need can get first-class support in the shipped
   strategies instead — precedent: the trusted-CA volume (BUILD-2342).
