@@ -1,6 +1,8 @@
 package buildconfig
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -328,4 +330,154 @@ func TestConvertEmitsTriggerWarnings(t *testing.T) {
 	assertContainsAll(t, triggerWarnings[0], "GitHub webhook trigger is dropped", "triggered-app")
 	assertContainsAll(t, triggerWarnings[1], "ConfigChange trigger is dropped")
 	assertContainsAll(t, triggerWarnings[2], "Found 2 trigger(s)", "(ConfigChange, GitHub)", "none work in Shipwright today")
+}
+
+// --- BUILD-2392: original-triggers annotation ---
+
+func annotationTriggers(t *testing.T, b *shipwrightv1beta1.Build) []interface{} {
+	t.Helper()
+	raw, ok := b.Annotations[OriginalTriggersAnnotation]
+	if !ok {
+		t.Fatalf("annotation %s not set; annotations: %v", OriginalTriggersAnnotation, b.Annotations)
+	}
+	var got []interface{}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("annotation is not valid JSON: %v; raw: %s", err, raw)
+	}
+	return got
+}
+
+func TestOriginalTriggersAnnotationPerType(t *testing.T) {
+	secretRef := &buildv1.SecretLocalReference{Name: "webhook-secret"}
+	wantSecretRef := map[string]interface{}{"name": "webhook-secret"}
+	cases := []struct {
+		name    string
+		trigger buildv1.BuildTriggerPolicy
+		want    map[string]interface{}
+	}{
+		{
+			name:    "github with secret reference",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.GitHubWebHookBuildTriggerType, GitHubWebHook: &buildv1.WebHookTrigger{SecretReference: secretRef}},
+			want:    map[string]interface{}{"type": "GitHub", "secretReference": wantSecretRef},
+		},
+		{
+			name:    "gitlab with secret reference",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.GitLabWebHookBuildTriggerType, GitLabWebHook: &buildv1.WebHookTrigger{SecretReference: secretRef}},
+			want:    map[string]interface{}{"type": "GitLab", "secretReference": wantSecretRef},
+		},
+		{
+			name:    "bitbucket with secret reference",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.BitbucketWebHookBuildTriggerType, BitbucketWebHook: &buildv1.WebHookTrigger{SecretReference: secretRef}},
+			want:    map[string]interface{}{"type": "Bitbucket", "secretReference": wantSecretRef},
+		},
+		{
+			name:    "generic with allowEnv",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.GenericWebHookBuildTriggerType, GenericWebHook: &buildv1.WebHookTrigger{AllowEnv: true, SecretReference: secretRef}},
+			want:    map[string]interface{}{"type": "Generic", "allowEnv": true, "secretReference": wantSecretRef},
+		},
+		{
+			name: "image change with from and paused",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.ImageChangeBuildTriggerType, ImageChange: &buildv1.ImageChangeTrigger{
+				From:                 &corev1.ObjectReference{Kind: "ImageStreamTag", Name: "base:latest", Namespace: "otherns"},
+				Paused:               true,
+				LastTriggeredImageID: "sha256:0ldstate",
+			}},
+			want: map[string]interface{}{"type": "ImageChange", "imageChange": map[string]interface{}{
+				"from":   map[string]interface{}{"kind": "ImageStreamTag", "name": "base:latest", "namespace": "otherns"},
+				"paused": true,
+			}},
+		},
+		{
+			name:    "image change minimal",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.ImageChangeBuildTriggerType, ImageChange: &buildv1.ImageChangeTrigger{}},
+			want:    map[string]interface{}{"type": "ImageChange"},
+		},
+		{
+			name:    "config change",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.ConfigChangeBuildTriggerType},
+			want:    map[string]interface{}{"type": "ConfigChange"},
+		},
+		{
+			name:    "deprecated github type preserved verbatim",
+			trigger: buildv1.BuildTriggerPolicy{Type: buildv1.GitHubWebHookBuildTriggerTypeDeprecated, GitHubWebHook: &buildv1.WebHookTrigger{SecretReference: secretRef}},
+			want:    map[string]interface{}{"type": "github", "secretReference": wantSecretRef},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newTriggerTestConverter()
+			bc := triggerTestBC(tc.trigger)
+			b := &shipwrightv1beta1.Build{}
+			c.processTriggers(bc, b)
+
+			got := annotationTriggers(t, b)
+			if len(got) != 1 {
+				t.Fatalf("expected 1 trigger in annotation, got %d: %v", len(got), got)
+			}
+			if !reflect.DeepEqual(got[0], tc.want) {
+				t.Errorf("sanitized trigger mismatch:\n got: %#v\nwant: %#v", got[0], tc.want)
+			}
+		})
+	}
+}
+
+func TestOriginalTriggersAnnotationMixedList(t *testing.T) {
+	c, _ := newTriggerTestConverter()
+	bc := triggerTestBC(
+		buildv1.BuildTriggerPolicy{Type: buildv1.GitHubWebHookBuildTriggerType, GitHubWebHook: &buildv1.WebHookTrigger{}},
+		buildv1.BuildTriggerPolicy{Type: buildv1.ConfigChangeBuildTriggerType},
+		buildv1.BuildTriggerPolicy{Type: buildv1.ImageChangeBuildTriggerType, ImageChange: &buildv1.ImageChangeTrigger{Paused: true}},
+	)
+	b := &shipwrightv1beta1.Build{}
+	c.processTriggers(bc, b)
+
+	got := annotationTriggers(t, b)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 triggers, got %d: %v", len(got), got)
+	}
+	wantTypes := []string{"GitHub", "ConfigChange", "ImageChange"}
+	for i, want := range wantTypes {
+		entry, ok := got[i].(map[string]interface{})
+		if !ok || entry["type"] != want {
+			t.Errorf("trigger %d: got %v, want type %s (original order must be preserved)", i, got[i], want)
+		}
+	}
+}
+
+func TestOriginalTriggersAnnotationAbsentWithoutTriggers(t *testing.T) {
+	c, _ := newTriggerTestConverter()
+	bc := triggerTestBC()
+	b := &shipwrightv1beta1.Build{}
+	c.processTriggers(bc, b)
+
+	if _, ok := b.Annotations[OriginalTriggersAnnotation]; ok {
+		t.Errorf("annotation %s must not be set when the BuildConfig has no triggers", OriginalTriggersAnnotation)
+	}
+}
+
+func TestOriginalTriggersAnnotationNeverLeaksSecrets(t *testing.T) {
+	c, _ := newTriggerTestConverter()
+	bc := triggerTestBC(
+		buildv1.BuildTriggerPolicy{Type: buildv1.GitHubWebHookBuildTriggerType, GitHubWebHook: &buildv1.WebHookTrigger{Secret: "inline-github-secret"}},
+		buildv1.BuildTriggerPolicy{Type: buildv1.GenericWebHookBuildTriggerType, GenericWebHook: &buildv1.WebHookTrigger{Secret: "inline-generic-secret", AllowEnv: true}},
+		buildv1.BuildTriggerPolicy{Type: buildv1.ImageChangeBuildTriggerType, ImageChange: &buildv1.ImageChangeTrigger{LastTriggeredImageID: "sha256:runtime-state"}},
+	)
+	b := &shipwrightv1beta1.Build{}
+	c.processTriggers(bc, b)
+
+	raw := b.Annotations[OriginalTriggersAnnotation]
+	if raw == "" {
+		t.Fatal("annotation not set")
+	}
+	for _, leaked := range []string{"inline-github-secret", "inline-generic-secret", "runtime-state", "lastTriggeredImageID"} {
+		if strings.Contains(raw, leaked) {
+			t.Errorf("annotation leaks %q: %s", leaked, raw)
+		}
+	}
+}
+
+func TestOriginalTriggersAnnotationNilBuild(t *testing.T) {
+	c, _ := newTriggerTestConverter()
+	bc := triggerTestBC(buildv1.BuildTriggerPolicy{Type: buildv1.ConfigChangeBuildTriggerType})
+	c.processTriggers(bc, nil) // must not panic when there is no Build to annotate
 }
