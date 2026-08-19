@@ -131,6 +131,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processOutput(bc, b)
 	c.processCompletionDeadline(bc, b)
 	c.addRegistries(b)
+	c.processTriggers(bc, b)
 
 	buildUnstructured, err := toUnstructured(b)
 	if err != nil {
