@@ -1684,6 +1684,40 @@ func TestConvertResourcesSourceStrategyWithServiceAccount(t *testing.T) {
 	}
 }
 
+func TestConvertResourcesExplicitServiceAccountPreserved(t *testing.T) {
+	// Regression (BUILD-2261 CodeRabbit): a BuildConfig with an explicitly
+	// configured spec.serviceAccount but NO pull secret must still carry
+	// that ServiceAccount into the BuildRun template.
+	annotations := runBuildRunTemplateConversion(t, map[string]interface{}{
+		"serviceAccount": "custom-builder-sa",
+		"source": map[string]interface{}{
+			"type": "Git",
+			"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+		},
+		"strategy": map[string]interface{}{
+			"type":           "Docker",
+			"dockerStrategy": map[string]interface{}{},
+		},
+		"output": map[string]interface{}{
+			"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
+		},
+		"resources": map[string]interface{}{
+			"limits": map[string]interface{}{"memory": "2Gi"},
+		},
+	})
+
+	value, ok := annotations[BuildRunTemplateAnnotation]
+	if !ok {
+		t.Fatalf("expected annotation %s, got: %v", BuildRunTemplateAnnotation, annotations)
+	}
+
+	tmpl := unmarshalBuildRunTemplate(t, value)
+
+	if tmpl.Spec.ServiceAccount == nil || *tmpl.Spec.ServiceAccount != "custom-builder-sa" {
+		t.Errorf("expected serviceAccount custom-builder-sa, got %v", tmpl.Spec.ServiceAccount)
+	}
+}
+
 func TestConvertResourcesRequestsOnly(t *testing.T) {
 	annotations := runBuildRunTemplateConversion(t, map[string]interface{}{
 		"source": map[string]interface{}{

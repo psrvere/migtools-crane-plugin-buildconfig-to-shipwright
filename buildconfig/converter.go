@@ -762,6 +762,11 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 	if generatedSA != "" {
 		sa := generatedSA
 		spec.ServiceAccount = &sa
+	} else if bc.Spec.ServiceAccount != "" {
+		// Preserve an explicitly configured ServiceAccount even when no
+		// pull secret forced us to generate one.
+		sa := bc.Spec.ServiceAccount
+		spec.ServiceAccount = &sa
 	}
 	for _, step := range stepNames {
 		spec.StepResources = append(spec.StepResources, shipwrightv1beta1.StepResourceOverride{
