@@ -125,6 +125,14 @@ func TestPostCommitWarnsPerForm(t *testing.T) {
 			wantWarning: false,
 		},
 		{
+			name: "args holding a single empty string still runs the hook",
+			postCommit: map[string]interface{}{
+				"args": []interface{}{""},
+			},
+			wantWarning:  true,
+			wantContains: "PostCommit hook (args:",
+		},
+		{
 			name: "postCommit with zero-value fields",
 			postCommit: map[string]interface{}{
 				"script":  "",
@@ -222,7 +230,7 @@ func TestPostCommitScriptAndCommandInvalid(t *testing.T) {
 	}
 }
 
-// TestPostCommitSilentOnPassThroughPaths is the placement guard. Convert() has
+// BUILD-2262: TestPostCommitSilentOnPassThroughPaths is the placement guard. Convert() has
 // three early returns that pass the BuildConfig through unchanged; on those
 // paths postCommit is NOT dropped, so warning about it would be false.
 func TestPostCommitSilentOnPassThroughPaths(t *testing.T) {

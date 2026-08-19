@@ -56,23 +56,27 @@ func (c *Converter) processPostCommit(bc *buildv1.BuildConfig) {
 // The script body is deliberately never interpolated: it is free-form and
 // frequently multi-line, which would break a single-line log entry.
 func postCommitFormDescriptor(pc buildv1.BuildPostCommitSpec) (string, bool) {
+	// Presence is tested with len(), not the joined string: args ([]string{""})
+	// joins to "" yet still runs the image entrypoint with one empty argument,
+	// so the hook fires and the warning is due.
+	hasArgs := len(pc.Args) > 0
 	args := strings.Join(pc.Args, " ")
 
 	switch {
 	case pc.Script != "":
-		if args != "" {
+		if hasArgs {
 			return fmt.Sprintf("script with args: %s", args), true
 		}
 		return "script", true
 
 	case len(pc.Command) > 0:
 		command := strings.Join(pc.Command, " ")
-		if args != "" {
+		if hasArgs {
 			return fmt.Sprintf("command: %s, args: %s", command, args), true
 		}
 		return fmt.Sprintf("command: %s", command), true
 
-	case args != "":
+	case hasArgs:
 		return fmt.Sprintf("args: %s", args), true
 
 	default:
