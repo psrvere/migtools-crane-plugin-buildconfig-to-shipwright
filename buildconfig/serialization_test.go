@@ -100,3 +100,40 @@ func TestToUnstructuredOmitsSerializationNoise(t *testing.T) {
 		t.Errorf("creationTimestamp present in output: %v", meta["creationTimestamp"])
 	}
 }
+
+func TestToUnstructuredRendersRetentionSucceededLimit(t *testing.T) {
+	limit := uint(5)
+	b := &shipwrightv1beta1.Build{}
+	b.Name = "history-app"
+	b.Namespace = "default"
+	b.Spec.Retention = &shipwrightv1beta1.BuildRetention{SucceededLimit: &limit}
+
+	u, err := toUnstructured(b)
+	if err != nil {
+		t.Fatalf("toUnstructured: %v", err)
+	}
+
+	spec, ok := u.Object["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("spec missing or wrong type: %v", u.Object["spec"])
+	}
+	retention, ok := spec["retention"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("spec.retention missing or wrong type: %v", spec["retention"])
+	}
+	// toUnstructured round-trips through JSON, so numeric fields surface as
+	// float64; accept int64 too in case the conversion path changes.
+	switch got := retention["succeededLimit"].(type) {
+	case float64:
+		if got != 5 {
+			t.Fatalf("spec.retention.succeededLimit = %v, want 5", got)
+		}
+	case int64:
+		if got != 5 {
+			t.Fatalf("spec.retention.succeededLimit = %v, want 5", got)
+		}
+	default:
+		t.Fatalf("spec.retention.succeededLimit = %v (%T), want numeric 5",
+			retention["succeededLimit"], retention["succeededLimit"])
+	}
+}

@@ -130,6 +130,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processSource(bc, b)
 	c.processOutput(bc, b)
 	c.processCompletionDeadline(bc, b)
+	c.processSuccessfulBuildsHistoryLimit(bc, b)
 	c.addRegistries(b)
 
 	buildUnstructured, err := toUnstructured(b)
@@ -687,6 +688,40 @@ func (c *Converter) processCompletionDeadline(bc *buildv1.BuildConfig, b *shipwr
 	b.Spec.Timeout = &timeout
 	c.Log.Infof("Mapping completionDeadlineSeconds %ds to Build timeout %s for BuildConfig %s",
 		seconds, timeout.Duration, bc.Name)
+}
+
+// minSucceededLimit and maxSucceededLimit mirror the Shipwright CRD validation
+// on BuildRetention.SucceededLimit (+kubebuilder:validation:Minimum=1,
+// +kubebuilder:validation:Maximum=10000 in shipwright-io/build v0.20.11).
+const (
+	minSucceededLimit = 1
+	maxSucceededLimit = 10000
+)
+
+// processSuccessfulBuildsHistoryLimit maps BuildConfig successfulBuildsHistoryLimit
+// to Shipwright Build retention.succeededLimit (BUILD-2259). Out-of-range values —
+// including 0, which OpenShift allows ("retain none") but the Shipwright CRD
+// rejects — are warned and dropped so the retention block stays unset and
+// migrated BuildRuns are never auto-pruned unexpectedly.
+func (c *Converter) processSuccessfulBuildsHistoryLimit(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) {
+	if bc.Spec.SuccessfulBuildsHistoryLimit == nil {
+		return
+	}
+
+	v := *bc.Spec.SuccessfulBuildsHistoryLimit
+	if v < minSucceededLimit || v > maxSucceededLimit {
+		c.Log.Warnf("successfulBuildsHistoryLimit %d on BuildConfig %s is outside the Shipwright retention.succeededLimit range [%d,%d]; leaving retention unset — migrated BuildRuns will not be auto-pruned",
+			v, bc.Name, minSucceededLimit, maxSucceededLimit)
+		return
+	}
+
+	limit := uint(v)
+	if b.Spec.Retention == nil {
+		b.Spec.Retention = &shipwrightv1beta1.BuildRetention{}
+	}
+	b.Spec.Retention.SucceededLimit = &limit
+	c.Log.Infof("Mapping successfulBuildsHistoryLimit %d to Build retention.succeededLimit for BuildConfig %s (OpenShift pruned old Build objects; Shipwright will prune BuildRuns)",
+		v, bc.Name)
 }
 
 func (c *Converter) addRegistries(b *shipwrightv1beta1.Build) {

@@ -1463,6 +1463,123 @@ func TestProcessCompletionDeadline(t *testing.T) {
 	}
 }
 
+func TestProcessSuccessfulBuildsHistoryLimit(t *testing.T) {
+	uintPtr := func(v uint) *uint { return &v }
+	int32Ptr := func(v int32) *int32 { return &v }
+
+	tests := []struct {
+		name              string
+		limit             *int32
+		preexisting       *shipwrightv1beta1.BuildRetention
+		expectedSucceeded *uint
+		expectWarning     bool
+	}{
+		{
+			name:  "successfulBuildsHistoryLimit unset leaves retention nil",
+			limit: nil,
+		},
+		{
+			name:              "lower CRD boundary 1 maps to retention.succeededLimit",
+			limit:             int32Ptr(1),
+			expectedSucceeded: uintPtr(1),
+		},
+		{
+			name:              "typical value maps to retention.succeededLimit",
+			limit:             int32Ptr(5),
+			expectedSucceeded: uintPtr(5),
+		},
+		{
+			name:              "upper CRD boundary 10000 maps to retention.succeededLimit",
+			limit:             int32Ptr(10000),
+			expectedSucceeded: uintPtr(10000),
+		},
+		{
+			name:          "zero is warned and dropped (Shipwright CRD Minimum=1)",
+			limit:         int32Ptr(0),
+			expectWarning: true,
+		},
+		{
+			name:          "negative value is warned and dropped",
+			limit:         int32Ptr(-1),
+			expectWarning: true,
+		},
+		{
+			name:          "value above CRD Maximum 10000 is warned and dropped",
+			limit:         int32Ptr(10001),
+			expectWarning: true,
+		},
+		{
+			name:              "pre-existing retention block is updated, not replaced",
+			limit:             int32Ptr(5),
+			preexisting:       &shipwrightv1beta1.BuildRetention{FailedLimit: uintPtr(3)},
+			expectedSucceeded: uintPtr(5),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, hook := logrustest.NewNullLogger()
+			c := &Converter{Log: logger}
+			bc := &buildv1.BuildConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "history-app",
+					Namespace: "default",
+				},
+				Spec: buildv1.BuildConfigSpec{
+					SuccessfulBuildsHistoryLimit: tt.limit,
+				},
+			}
+			b := &shipwrightv1beta1.Build{}
+			if tt.preexisting != nil {
+				b.Spec.Retention = tt.preexisting
+			}
+
+			c.processSuccessfulBuildsHistoryLimit(bc, b)
+
+			var warnings []string
+			for _, entry := range hook.AllEntries() {
+				if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, "successfulBuildsHistoryLimit") {
+					warnings = append(warnings, entry.Message)
+				}
+			}
+			if tt.expectWarning {
+				if len(warnings) != 1 {
+					t.Fatalf("expected exactly 1 warning, got %d: %v", len(warnings), warnings)
+				}
+				if !strings.Contains(warnings[0], "history-app") {
+					t.Errorf("warning does not name the BuildConfig: %q", warnings[0])
+				}
+			} else if len(warnings) != 0 {
+				t.Fatalf("expected no warnings, got: %v", warnings)
+			}
+
+			if tt.expectedSucceeded == nil {
+				if tt.preexisting == nil && b.Spec.Retention != nil {
+					t.Fatalf("expected retention to stay nil, got %+v", b.Spec.Retention)
+				}
+				if b.Spec.Retention != nil && b.Spec.Retention.SucceededLimit != nil {
+					t.Fatalf("expected succeededLimit to stay unset, got %d", *b.Spec.Retention.SucceededLimit)
+				}
+				return
+			}
+			if b.Spec.Retention == nil || b.Spec.Retention.SucceededLimit == nil {
+				t.Fatalf("expected retention.succeededLimit to be set, got %+v", b.Spec.Retention)
+			}
+			if *b.Spec.Retention.SucceededLimit != *tt.expectedSucceeded {
+				t.Errorf("succeededLimit = %d, want %d", *b.Spec.Retention.SucceededLimit, *tt.expectedSucceeded)
+			}
+			if tt.preexisting != nil {
+				if b.Spec.Retention != tt.preexisting {
+					t.Error("pre-existing retention block was replaced instead of updated")
+				}
+				if b.Spec.Retention.FailedLimit == nil || *b.Spec.Retention.FailedLimit != 3 {
+					t.Errorf("pre-existing failedLimit was clobbered: %+v", b.Spec.Retention.FailedLimit)
+				}
+			}
+		})
+	}
+}
+
 func TestConvertNoOutputImage(t *testing.T) {
 	tests := []struct {
 		name   string
