@@ -1,0 +1,18 @@
+# fullsend-ai/agents — vendored verbatim. DO NOT EDIT ANYTHING UNDER vendor/.
+# Local changes belong in ../src/header.md. See ../bin/sync.
+# pinned_sha=ee30be6030f8e6fbe4ba5fc5638eb483dbffeb84
+# fetched_utc=2026-08-20T21:48:43Z
+# columns: local-path <TAB> sha256 <TAB> upstream-path
+SKILL.md	3aa07a122b1d8aeeba5e4ad8ec9df06a1b9fea3e524121b2ff3e6f42054f8e9c	skills/pr-review/SKILL.md
+meta-prompt.md	d27fa01ba22a0d26cff9e612929e7690ecf21ff6291763dd3942a221b1195b69	skills/pr-review/meta-prompt.md
+github/SKILL.md	5712be3492bc65e30a06f520c00e83d2644974de1d4fd1337d861fe430203024	skills/pr-review/github/SKILL.md
+docs-review/SKILL.md	a16671a109ab4f5e17fe96d9757e8b67d4c88382a8514f2f3ac364c9b270042a	skills/docs-review/SKILL.md
+agent-review.md	096ef2da519f44da96632dd195b6d9b909c5de744c08d2e9a2410d35ba7c75fd	agents/review.md
+sub-agents/challenger.md	7ac175c5e51514016e3d62f3afc3b7399e136cc3a0026c4b6c40233575915786	skills/pr-review/sub-agents/challenger.md
+sub-agents/correctness.md	dec0ca5883794bc90b2eaef5df8a70ac17bc17562de21d2f1d2d13adc634b0d0	skills/pr-review/sub-agents/correctness.md
+sub-agents/cross-repo-contracts.md	3359a92e9db28b89bdda2a7887f2b042a23994a6a3a6b4f66a6dfbc88023bc43	skills/pr-review/sub-agents/cross-repo-contracts.md
+sub-agents/docs-currency.md	e8635e268b5a4e1b1f0416b90fcca2adb2319f37e713616db5ce62a67492b9e3	skills/pr-review/sub-agents/docs-currency.md
+sub-agents/intent-coherence.md	1ddc16b37643af0c2f9f9221babe11d9cd5b19000db4151a159a5f9c1af579d5	skills/pr-review/sub-agents/intent-coherence.md
+sub-agents/security.md	93fa30d04fde0af9e96e115e5fcb27d3223ebfb9d456b87ad5638dba67e6e84f	skills/pr-review/sub-agents/security.md
+sub-agents/security-triage.md	690e3a028a1f2dc40277c435a2628cddcfc5e44c34c2a5d3f8ab697c0b4c82d1	skills/pr-review/sub-agents/security-triage.md
+sub-agents/style-conventions.md	efafe6156cc19f5e02cb624c7b734c563703322a82713087fe2913d4bc28e19c	skills/pr-review/sub-agents/style-conventions.md

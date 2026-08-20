@@ -1,0 +1,26 @@
+Vendored content — fullsend-ai/agents
+=====================================
+
+Every file in this directory (and its subdirectories) is copied verbatim from:
+
+    https://github.com/fullsend-ai/agents
+    pinned commit: ee30be6030f8e6fbe4ba5fc5638eb483dbffeb84
+
+Copyright the fullsend-ai contributors.
+Licensed under the Apache License, Version 2.0.
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+
+MODIFICATIONS
+-------------
+None. These files are unmodified copies. All local behaviour changes live in
+`../src/header.md` as an override block that is prepended at build time.
+
+This directory is machine-managed. Do not edit anything here — `../bin/sync`
+verifies every file against the sha256 digests recorded in `.manifest` and
+will report any local edit as drift.
