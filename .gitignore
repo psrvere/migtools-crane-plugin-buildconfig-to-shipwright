@@ -1,0 +1,5 @@
+# Local machine configuration written by /setup-repos — never committed.
+repo.md
+
+# Design docs and TRACKER.md are per-author working notes, not project artifacts.
+designs/
