@@ -37,7 +37,11 @@ Two entries are not repositories and have no remote:
 
 - **Work Directory** — the root the search starts from.
 - **Designs Directory** — where design docs and `TRACKER.md` are written. Defaults to
-  `<Crane Plugin Repo>/designs`. Gitignored, so nothing you write there is ever committed.
+  `<Crane Plugin Repo>/designs`, which `.gitignore` covers.
+
+  A custom value **must live outside any repository checkout**. `.gitignore` only ignores
+  `designs/`; a custom directory elsewhere inside the repo would not be ignored and the
+  author's notes would be committed. Reject such a path and ask again.
 
 `Crane Lib Repo` is the frozen pre-2026-08-13 home of the conversion code. It is read as a
 prior-art archive only and is never a PR target. Leaving it unset is fine.
@@ -71,7 +75,15 @@ For **Manual**, tell them:
 > ```
 > Then edit `repo.md` with your real paths.
 
-Stop there. For **Auto-discover**, continue to Step 3.
+The template ships `/path/to/...` placeholders, so a partly-edited file looks configured
+but is not. Before reporting success, read the file back and check that:
+
+- every required label is present,
+- no value still contains `/path/to/`,
+- every path exists on disk,
+- `Designs Directory` is outside every repository checkout.
+
+Report the exact failing lines and treat setup as incomplete until they are fixed. For **Auto-discover**, continue to Step 3.
 
 ## Step 3: Auto-discover
 
@@ -122,9 +134,9 @@ and fails later with a confusing error.
 
 Set `Designs Directory` to `<Crane Plugin Repo>/designs` unless the user gives another path.
 
-Ask for `Author` (your kerberos ID) if it is not already known.
-
-Then confirm what was written and remind the user that `repo.md` is gitignored.
+Then read the file back and run the same validation as manual mode — required labels
+present, no `/path/to/` left, every path resolving on disk, Designs Directory outside any
+checkout. Report the result, and remind the user that `repo.md` is gitignored.
 
 ## Step 4: Partial update
 

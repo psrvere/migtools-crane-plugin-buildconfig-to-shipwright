@@ -8,4 +8,3 @@ Crane Plugin Repo: /path/to/migtools/crane-plugin-buildconfig-to-shipwright
 Crane Repo: /path/to/migtools/crane
 Crane Lib Repo: /path/to/migtools/crane-lib
 Designs Directory: /path/to/designs
-Author: your-kerberos-id
