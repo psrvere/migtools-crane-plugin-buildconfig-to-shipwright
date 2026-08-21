@@ -125,7 +125,7 @@ The single most important thing to understand:
 ├── README.md            ← you are here
 ├── SKILL.md             ← GENERATED — do not edit. This is what Claude loads.
 ├── src/
-│   └── header.md        ← OURS. Frontmatter + local overrides O1–O9.
+│   └── header.md        ← OURS. Frontmatter + local overrides O1–O10.
 ├── bin/
 │   └── sync             ← verify / check / update / build
 └── vendor/              ← THEIRS. Byte-identical to upstream @ ee30be60.
@@ -181,8 +181,9 @@ this table is only an index. They are restated at the top of the generated
 | **O5** | Forge is always GitHub; derive `PR_NUMBER`/`REPO_FULL_NAME` inline | No `FULLSEND_FORGE`, no pre-script |
 | **O6** | Inject this repo's `AGENTS.md` plus the CI-parity, controller-runtime-skew, no-`replace`, and frozen-`convert/` invariants into every sub-agent | Repo knowledge upstream cannot have |
 | **O7** | `cross-repo-contracts` dispatches on crane-lib boundary changes; `--only` flag | Tuned for this repo |
-| **O8** | Fetch prior review inline via `gh` | Replaces `pre-fetch-prior-review.sh` |
+| **O8** | Fetch prior review inline via `gh`, accepting only a review carrying our head-SHA marker | Replaces `pre-fetch-prior-review.sh` *and* its provenance check |
 | **O9** | Report format, always printing challenger removals | Tuning signal |
+| **O10** | `$REVIEW_FINDING_SEVERITY_THRESHOLD` = `info` — suppress nothing | Upstream requires it; no harness to supply it |
 
 ---
 
@@ -202,14 +203,17 @@ bin/sync --update [--ref <sha>]      # diff upstream's changes, rewrite vendor/,
 `--update` never touches `src/header.md`. Run `bin/sync --build` after editing
 `src/header.md` yourself.
 
-**After any update, re-read the O1–O9 overrides.** They reference upstream
+**After any update, re-read the O1–O10 overrides.** They reference upstream
 concepts by name — step numbers, `$FULLSEND_OUTPUT_DIR`, `post-review.sh`,
 sub-agent filenames. If upstream renames a step or drops a sub-agent, an
 override can silently stop applying.
 
-**Never edit anything under `vendor/`.** `bin/sync` hashes every file, reports
-your edit as drift, and the next `--update` overwrites it. Put the change in
-`src/header.md` as a new override instead.
+**Never edit anything under `vendor/`.** `bin/sync` hashes every file listed in
+`.manifest` and reports an edit as `EDITED`, a deletion as `MISSING`, and a file
+present under `vendor/` that the manifest does not list as `EXTRA` — so adding a
+file is caught too, not only changing one. Any of the three makes `bin/sync` exit
+non-zero, which is what makes it usable as a pre-commit or CI gate. Put the change
+in `src/header.md` as a new override instead.
 
 ---
 

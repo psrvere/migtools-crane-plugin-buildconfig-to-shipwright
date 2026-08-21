@@ -12,6 +12,8 @@
 # Local edits belong in src/header.md. Anything under vendor/ is machine-managed;
 # editing it there is reported as drift and will be overwritten by --update.
 #
+# Exits non-zero when vendor/ has drift, so this is usable as a gate.
+#
 set -uo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,14 +23,23 @@ HEADER="$SKILL_DIR/src/header.md"
 OUT="$SKILL_DIR/SKILL.md"
 REPO="fullsend-ai/agents"
 
+# vendor/.manifest and vendor/NOTICE are ours, not upstream's, so they are the
+# only files under vendor/ that the manifest is not expected to list.
+UNLISTED_OK=".manifest NOTICE"
+
 MODE="verify"; REF=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check)  MODE="check" ;;
     --update) MODE="update" ;;
     --build)  MODE="build" ;;
-    --ref)    shift; REF="${1:-}" ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --ref)
+      shift
+      [ $# -gt 0 ] && [ -n "${1:-}" ] || { echo "--ref requires a commit sha" >&2; exit 2; }
+      REF="$1" ;;
+    # Print the comment block above, stopping at the first non-comment line, so
+    # this stays correct when the block grows.
+    -h|--help) awk 'NR>1{ if (!/^#/) exit; sub(/^# ?/,""); print }' "$0"; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
   shift
@@ -42,33 +53,74 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 warn()  { printf '\033[33m%s\033[0m\n' "$*"; }
 
+# shasum is perl-based and absent from minimal Linux images; sha256sum is absent
+# from some macOS setups. Without this, a missing tool reports every vendored
+# file as locally edited, which is a completely misleading explanation.
+if command -v shasum >/dev/null 2>&1; then
+  sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha256() { sha256sum "$1" | awk '{print $1}'; }
+else
+  echo "FATAL: neither shasum nor sha256sum found — cannot verify vendor/" >&2; exit 1
+fi
+
 # ---------------------------------------------------------------- build
 build() {
   [ -f "$HEADER" ] || { echo "FATAL: missing $HEADER" >&2; exit 1; }
   [ -f "$VENDOR/SKILL.md" ] || { echo "FATAL: missing $VENDOR/SKILL.md" >&2; exit 1; }
+  # The stripper below removes a YAML header. Given a file without one it emits
+  # nothing and still exits 0, which would quietly cut SKILL.md down to just our
+  # overrides — so require the header rather than trusting the awk.
+  local first; IFS= read -r first < "$VENDOR/SKILL.md"
+  printf '%s' "$first" | grep -qE '^---[[:space:]]*$' \
+    || { echo "FATAL: $VENDOR/SKILL.md has no YAML frontmatter — refusing to build" >&2; exit 1; }
   # Strip the vendored YAML frontmatter so the built file has exactly one.
   {
     cat "$HEADER"
     awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; if(n<=2) next} n>=2{print}' "$VENDOR/SKILL.md"
-  } > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+  } > "$OUT.tmp"
+  if [ "$(wc -l < "$OUT.tmp")" -le "$(wc -l < "$HEADER")" ]; then
+    rm -f "$OUT.tmp"
+    echo "FATAL: build produced no vendored content — refusing to overwrite $OUT" >&2; exit 1
+  fi
+  mv "$OUT.tmp" "$OUT"
   green "built SKILL.md ($(wc -l < "$OUT" | tr -d ' ') lines) = src/header.md + vendor/SKILL.md@${PINNED:0:8}"
 }
 
 # ------------------------------------------------------- verify local drift
 verify() {
   local bad=0 n=0
+  local listed; listed="$(mktemp)"
   while IFS="$(printf '\t')" read -r lp sha up; do
     case "$lp" in \#*|"") continue ;; esac
     n=$((n+1))
+    printf '%s\n' "$lp" >> "$listed"
     if [ ! -f "$VENDOR/$lp" ]; then red "  MISSING  $lp"; bad=$((bad+1)); continue; fi
-    local have; have="$(shasum -a 256 "$VENDOR/$lp" | awk '{print $1}')"
+    local have; have="$(sha256 "$VENDOR/$lp")"
     if [ "$have" != "$sha" ]; then
       red "  EDITED   $lp   (local edit under vendor/ — move it to src/header.md)"
       bad=$((bad+1))
     fi
   done < "$MANIFEST"
+
+  # Walking the manifest alone only catches edits and deletions. A file *added*
+  # under vendor/ is in no list, so it would never be looked at — and --update
+  # would never remove it. --only=<name> loads vendor/sub-agents/<name>.md, so
+  # an unlisted file can sit on a path the skill actually reads.
+  local f rel skip
+  while IFS= read -r f; do
+    rel="${f#"$VENDOR/"}"
+    skip=0
+    for ok in $UNLISTED_OK; do [ "$rel" = "$ok" ] && skip=1; done
+    [ "$skip" -eq 1 ] && continue
+    grep -qxF "$rel" "$listed" && continue
+    red "  EXTRA    $rel   (not in .manifest — delete it, or vendor it properly)"
+    bad=$((bad+1))
+  done < <(find "$VENDOR" -type f | sort)
+  rm -f "$listed"
+
   if [ "$bad" -eq 0 ]; then green "vendor/ clean — $n files match .manifest (pin ${PINNED:0:8})"
-  else red "vendor/ has $bad problem(s) of $n"; fi
+  else red "vendor/ has $bad problem(s) across $n manifest entries"; fi
   return $bad
 }
 
@@ -81,25 +133,37 @@ check_upstream() {
   warn "upstream main is ${head:0:8}; you are pinned to ${PINNED:0:8}"
   echo
   echo "Files in this bundle that changed upstream:"
-  local any=0
+  local any=0 tmp; tmp="$(mktemp)"
   while IFS="$(printf '\t')" read -r lp sha up; do
     case "$lp" in \#*|"") continue ;; esac
-    local newsha
-    newsha="$(curl -fsSL "https://raw.githubusercontent.com/$REPO/$head/$up" 2>/dev/null | shasum -a 256 | awk '{print $1}')"
-    if [ -z "$newsha" ]; then red "  GONE      $up   (moved or deleted upstream)"; any=1
-    elif [ "$newsha" != "$sha" ]; then warn "  CHANGED   $up"; any=1; fi
+    # Download to a file rather than piping into the hasher: on a 404, curl
+    # writes nothing but the hasher still returns the empty-input digest, so a
+    # file deleted upstream would report as CHANGED and GONE would be dead code.
+    if ! curl -fsSL "https://raw.githubusercontent.com/$REPO/$head/$up" -o "$tmp" 2>/dev/null; then
+      red "  GONE      $up   (moved or deleted upstream)"; any=1; continue
+    fi
+    local newsha; newsha="$(sha256 "$tmp")"
+    if [ "$newsha" != "$sha" ]; then warn "  CHANGED   $up"; any=1; fi
   done < "$MANIFEST"
+  rm -f "$tmp"
   [ "$any" -eq 0 ] && green "  (none — main moved but this bundle is unaffected)"
   echo
   echo "Review their diff, then:  bin/sync --update --ref $head"
-  echo "Re-read src/header.md overrides O1-O9 afterwards — upstream may have moved what they patch."
+  echo "Re-read src/header.md overrides O1-O10 afterwards — upstream may have moved what they patch."
+  return 0
 }
 
 # ------------------------------------------------------------- update
 update() {
   if [ "$REF" = "$PINNED" ]; then
+    # Without this, a missing gh or a dead network leaves REF at PINNED and the
+    # next line reports "nothing to do" — indistinguishable from being current.
+    command -v gh >/dev/null \
+      || { red "gh not installed — cannot resolve upstream main; pass --ref <sha>"; return 1; }
     local head; head="$(gh api "repos/$REPO/commits/main" --jq .sha 2>/dev/null)"
-    [ -n "$head" ] && REF="$head"
+    [ -n "$head" ] \
+      || { red "could not reach $REPO — cannot resolve upstream main; pass --ref <sha>"; return 1; }
+    REF="$head"
   fi
   [ "$REF" != "$PINNED" ] || { green "already at $REF — nothing to do"; return 0; }
   echo "updating ${PINNED:0:8} -> ${REF:0:8}"
@@ -120,7 +184,7 @@ update() {
       red "  GONE      $up — upstream moved it. Resolve by hand before continuing."
       rm -rf "$tmp"; return 1
     fi
-    local newsha; newsha="$(shasum -a 256 "$tmp/$lp" | awk '{print $1}')"
+    local newsha; newsha="$(sha256 "$tmp/$lp")"
     if [ "$newsha" != "$sha" ]; then
       warn "  CHANGED   $lp"
       diff -u "$VENDOR/$lp" "$tmp/$lp" | sed 's/^/      /' | head -60
@@ -136,15 +200,28 @@ update() {
   cp "$new_manifest" "$MANIFEST"
   rm -rf "$tmp"
   PINNED="$REF"
-  sed -i '' "s|pinned commit: .*|pinned commit: $REF|" "$VENDOR/NOTICE" 2>/dev/null || true
+  # `sed -i ''` is BSD-only: GNU sed reads the '' as the script and the real
+  # expression as a filename, so on Linux NOTICE would silently keep the old
+  # commit while .manifest moved on — making the Apache-2.0 attribution wrong.
+  if [ -f "$VENDOR/NOTICE" ]; then
+    if sed "s|pinned commit: .*|pinned commit: $REF|" "$VENDOR/NOTICE" > "$VENDOR/NOTICE.tmp"; then
+      mv "$VENDOR/NOTICE.tmp" "$VENDOR/NOTICE"
+    else
+      rm -f "$VENDOR/NOTICE.tmp"
+      red "  WARNING: could not update the pinned commit in vendor/NOTICE — fix it by hand (Apache-2.0 attribution)"
+    fi
+  fi
   green "updated $changed file(s); pin is now ${REF:0:8}"
-  [ "$changed" -gt 0 ] && warn "Re-read src/header.md overrides O1-O9 — verify they still apply."
+  [ "$changed" -gt 0 ] && warn "Re-read src/header.md overrides O1-O10 — verify they still apply."
   build
 }
 
+# Callers must honour verify()'s exit status, or bin/sync can never gate
+# anything — and worse, build() would rebuild SKILL.md from a tampered
+# vendor/SKILL.md under a green success message.
 case "$MODE" in
   build)  build ;;
-  verify) verify; build ;;
-  check)  verify; echo; check_upstream ;;
-  update) verify >/dev/null; update ;;
+  verify) if verify; then build; else exit 1; fi ;;
+  check)  verify; rc=$?; echo; check_upstream; [ "$rc" -eq 0 ] || exit 1 ;;
+  update) verify || warn "proceeding anyway — --update overwrites everything under vendor/"; update ;;
 esac

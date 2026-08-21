@@ -22,5 +22,7 @@ None. These files are unmodified copies. All local behaviour changes live in
 `../src/header.md` as an override block that is prepended at build time.
 
 This directory is machine-managed. Do not edit anything here — `../bin/sync`
-verifies every file against the sha256 digests recorded in `.manifest` and
-will report any local edit as drift.
+verifies every file against the sha256 digests recorded in `.manifest`, reports
+any edited, deleted, or unlisted file as drift, and exits non-zero when it finds
+any. (`.manifest` and this NOTICE are ours rather than upstream's, so they are
+the only files here the manifest does not list.)

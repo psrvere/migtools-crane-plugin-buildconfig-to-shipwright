@@ -1,6 +1,6 @@
 ---
 name: deep-review
-description: Deep multi-agent PR review — triages the change, dispatches up to 8 specialised sub-agents in parallel (correctness, security, intent-coherence, style, docs, cross-repo contracts), runs an adversarial challenger pass to strip false positives, and produces a severity-ranked verdict. Report-only by default. Trigger on "deep-review", "deep review this PR", "fan-out review", or "adversarial review". Reviews an open PR by number or URL; it has no local-branch mode.
+description: Deep multi-agent PR review — triages the change, dispatches up to 6 specialised sub-agents in parallel (correctness, security, intent-coherence, style, docs, cross-repo contracts) behind a security-triage pre-pass, then runs an adversarial challenger pass to strip false positives and produces a severity-ranked verdict. Report-only by default. Trigger on "deep-review", "deep review this PR", "fan-out review", or "adversarial review". Reviews an open PR by number or URL; it has no local-branch mode.
 argument-hint: <pr-url|pr-number> [--post] [--only=correctness,security,...]
 allowed-tools: [Bash, Read, Grep, Glob, Agent, AskUserQuestion]
 user_invocable: true
@@ -84,6 +84,14 @@ sensitive paths. That script does not exist here, so enforce it yourself:
 This is a hard rule, not a heuristic. It holds even with `--post` and even if
 every sub-agent returned clean.
 
+**Deliberate divergence from upstream.** `vendor/agent-review.md` requires
+`request-changes` when a protected-path change is not justified; this override
+instead caps the verdict at `comment`. That is intentional: this skill has no
+app identity here and posts as a human collaborator on someone else's PR, so the
+conservative direction is to flag and let a human decide, never to block. Keep
+the cap. If upstream's protected-path text changes, this paragraph is the thing
+to re-read, not a bug to reconcile.
+
 ### O4. Model mapping
 
 Sub-agent frontmatter uses Vertex model IDs. Map them when calling the Agent
@@ -111,17 +119,45 @@ every parallel Agent call in one assistant turn.
 
 Derive the required variables from the argument before step 1:
 
+Take the number that follows `/pull/` — **never** the last number in the string.
+Real GitHub URLs routinely end in some other number (`?w=1` is the hide-whitespace
+toggle; `/commits/<sha>` and `#pullrequestreview-<id>` both end in digits), and in
+an established repo that number is usually itself a valid PR. The existence check
+then passes and the entire review silently runs against the wrong PR.
+
 ```bash
-# $ARGUMENTS is a PR URL or a bare PR number
-PR_NUMBER=$(echo "$ARGUMENTS" | grep -oE '[0-9]+' | tail -1)
-REPO_FULL_NAME=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+# $ARGUMENTS is a PR URL or a bare PR number. Branch on which, because a bare
+# "#28" is all fragment — stripping #... unconditionally would empty it.
+ARG="$ARGUMENTS"
+case "$ARG" in
+  *://*|*/pull/*)                           # URL: drop ?query and #fragment
+    ARG="${ARG%%#*}"; ARG="${ARG%%\?*}"
+    PR_NUMBER="$(printf '%s' "$ARG" | sed -nE 's@.*/pull/([0-9]+).*@\1@p')" ;;
+  *)                                        # bare number, optionally "#28"
+    PR_NUMBER="$(printf '%s' "$ARG" | tr -d '#[:space:]' | grep -xE '[0-9]+')" ;;
+esac
+# Refuse rather than guess: a URL with no /pull/ segment (an issue link, a repo
+# root) is not a PR reference, even though it may well end in digits.
+[ -n "$PR_NUMBER" ] || { echo "could not read a PR number from: $ARGUMENTS"; exit 1; }
+
+# A full URL naming a different repo wins over the local checkout.
+REPO_FULL_NAME="$(printf '%s' "$ARG" | sed -nE 's@^https?://[^/]+/([^/]+/[^/]+)/pull/.*@\1@p')"
+[ -n "$REPO_FULL_NAME" ] || REPO_FULL_NAME="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 export PR_NUMBER REPO_FULL_NAME
-gh pr view "$PR_NUMBER" --repo "$REPO_FULL_NAME" --json number,title,state >/dev/null \
-  || { echo "PR #$PR_NUMBER not found in $REPO_FULL_NAME"; exit 1; }
+
+PR_INFO="$(gh pr view "$PR_NUMBER" --repo "$REPO_FULL_NAME" \
+  --json number,title,state --jq '"\(.state)\t\(.title)"' 2>/dev/null)"
+[ -n "$PR_INFO" ] || { echo "PR #$PR_NUMBER not found in $REPO_FULL_NAME"; exit 1; }
+PR_STATE="${PR_INFO%%$'\t'*}"; PR_TITLE="${PR_INFO#*$'\t'}"
+
+# Always show what was resolved — this is the only chance to notice a bad parse.
+echo "reviewing $REPO_FULL_NAME#$PR_NUMBER — $PR_TITLE ($PR_STATE)"
+[ "$PR_STATE" = "OPEN" ] \
+  || { echo "PR #$PR_NUMBER is $PR_STATE — this skill reviews open PRs only."; exit 1; }
 ```
 
-If the argument is a full URL pointing at a *different* repo, use the owner/repo
-from the URL instead of `gh repo view`.
+Report the resolved `owner/repo#number — title (state)` line to the user before
+dispatching anything. Do not proceed on a non-`OPEN` PR.
 
 ### O6. Repo context injected into every sub-agent
 
@@ -175,17 +211,31 @@ Follow the vendored step 3c selection rules. Two additions:
 ### O8. Re-review context
 
 Upstream pre-fetches a prior review via `pre-fetch-prior-review.sh` and passes
-`PRIOR_REVIEW_SHA`. There is no pre-script here. Fetch it inline instead:
+both `PRIOR_REVIEW_SHA` and `PRIOR_REVIEW_PROVENANCE`, discarding any prior
+review it cannot attribute to the expected author
+(`vendor/agent-review.md:39-50`, `vendor/SKILL.md:193-195`). There is no
+pre-script here, so do **both** halves inline. The provenance half is not
+optional: prior findings feed severity anchoring in `vendor/meta-prompt.md`, so
+mistaking someone else's comment for a prior run corrupts this run's severities.
+
+**Only a review this skill wrote counts as a prior review.** The newest review by
+*anyone* does not — a human "LGTM" posted after our review would become the most
+recent one. We have no app identity to check (posting goes through `gh pr review`
+as the user), so the hidden head-SHA marker from vendored step 7 is the
+discriminator: it is on the first line of every review this skill produces.
 
 ```bash
-gh pr view "$PR_NUMBER" --repo "$REPO_FULL_NAME" \
-  --json reviews --jq '.reviews[-1].body // empty' 2>/dev/null | head -200
+# Newest review carrying our marker — not simply the newest review.
+PRIOR_REVIEW="$(gh pr view "$PR_NUMBER" --repo "$REPO_FULL_NAME" --json reviews \
+  --jq '[.reviews[] | select(.body | test("^<!-- \\*\\*Head SHA:\\*\\*"))] | last | .body // empty' \
+  2>/dev/null | head -200)"
+PRIOR_REVIEW_SHA="$(printf '%s' "$PRIOR_REVIEW" \
+  | sed -nE '1s/.*Head SHA:\*\* ([0-9a-f]{7,40}).*/\1/p')"
 ```
 
-If a prior body contains the hidden head-SHA marker described in vendored step
-7, extract it and use it as `PRIOR_REVIEW_SHA` so severity anchoring works. If
-there is no prior review, treat every "prior findings" slot as
-`"none — first review"` and continue.
+If `PRIOR_REVIEW` is empty — no marker found — treat every "prior findings" slot
+as `"none — first review"` and continue. Never fall back to the newest review by
+an arbitrary author.
 
 ### O9. Reporting
 
@@ -205,6 +255,24 @@ Protected    : <paths, or "none">
 Always print what the challenger **removed** and why. That log is the main
 signal for whether the review is over- or under-firing, and it is the first
 thing to tune.
+
+### O10. Severity threshold — report everything
+
+`vendor/agent-review.md:54-57` marks `$REVIEW_FINDING_SEVERITY_THRESHOLD` as
+**required**, supplied by `harness/review.yaml`, and says callers running outside
+that harness must set it themselves. We are such a caller, and nothing else here
+sets it — which would leave both the severity filter and the
+`request-changes` → `comment` downgrade it triggers undefined.
+
+> Treat `$REVIEW_FINDING_SEVERITY_THRESHOLD` as **`info`**, the lowest severity
+> in upstream's `info < low < medium < high < critical` order. Suppress nothing.
+> Because nothing is ever filtered out, the rule that downgrades a
+> `request-changes` or `reject` verdict when filtering empties the findings array
+> can never fire — ignore it.
+
+Report-only is already the default (O3), so the useful failure mode here is
+showing too much rather than too little. If that becomes noisy, raise this to
+`low` rather than reintroducing an unset variable.
 
 ---
 
