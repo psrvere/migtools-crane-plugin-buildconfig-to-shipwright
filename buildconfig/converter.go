@@ -676,8 +676,18 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	images := bc.Spec.Source.Images
 	dockerfile := bc.Spec.Source.Dockerfile
 
+	// Inline Dockerfiles hold raw file contents, which Shipwright cannot represent:
+	// v1beta1 Source has no dockerfile field, and Source-to-Image builds the Dockerfile
+	// it generates itself. The content is unmigratable under either strategy — Docker
+	// errors because the resulting build would differ silently; Source warns because the
+	// field is inapplicable to S2I and usually signals the wrong strategy type.
 	if dockerfile != nil && bc.Spec.Strategy.Type == buildv1.DockerBuildStrategyType {
 		c.Log.Error("Inline Dockerfile is not supported in buildah strategy. Consider moving it to a separate file.")
+	}
+	if dockerfile != nil && bc.Spec.Strategy.Type == buildv1.SourceBuildStrategyType {
+		c.Log.Warnf("BuildConfig '%s' has an inline Dockerfile set on a Source strategy. "+
+			"Inline Dockerfiles are not used by Source-to-Image and were not migrated. "+
+			"If this was intended for a Docker strategy build, reconfigure the BuildConfig strategy type.", bc.Name)
 	}
 
 	sourceCount := 0
