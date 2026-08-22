@@ -44,9 +44,9 @@ func convertWithFreshConverter(t *testing.T, bc *buildv1.BuildConfig) []unstruct
 	t.Helper()
 	logger, _ := logrustest.NewNullLogger()
 	converter := &Converter{Log: logger, Opts: PluginOptionalFields{}}
-	resources, err := converter.Convert(bc)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	resources, outcome := converter.Convert(bc)
+	if outcome.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
 	}
 	return resources
 }
@@ -141,13 +141,13 @@ func TestCollidingTruncatedNamesGetDistinctNames(t *testing.T) {
 	logger, _ := logrustest.NewNullLogger()
 	converter := &Converter{Log: logger, Opts: PluginOptionalFields{}}
 
-	resourcesA, err := converter.Convert(newNameTestBC(nameA, "myns", "", ""))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	resourcesA, outcomeA := converter.Convert(newNameTestBC(nameA, "myns", "", ""))
+	if outcomeA.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcomeA.Reason)
 	}
-	resourcesB, err := converter.Convert(newNameTestBC(nameB, "myns", "", ""))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	resourcesB, outcomeB := converter.Convert(newNameTestBC(nameB, "myns", "", ""))
+	if outcomeB.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcomeB.Reason)
 	}
 
 	buildNameA := resourcesA[0].GetName()
@@ -169,9 +169,9 @@ func TestSharedServiceAccountMergesImagePullSecrets(t *testing.T) {
 
 	convert := func(bc *buildv1.BuildConfig) []unstructured.Unstructured {
 		t.Helper()
-		resources, err := converter.Convert(bc)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		resources, outcome := converter.Convert(bc)
+		if outcome.State == OutcomeFailed {
+			t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
 		}
 		return resources
 	}

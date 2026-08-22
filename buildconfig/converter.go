@@ -42,6 +42,10 @@ const (
 	maxConversionWarningsBytes = 32 << 10
 	BuildRunTemplateAnnotation = "buildconfig-to-shipwright/buildrun-template"
 	OriginalTriggersAnnotation = "buildconfig-to-shipwright/original-triggers"
+	// ConversionOutcomeAnnotation records the conversion disposition on the
+	// generated Build so the outcome is observable in the output, not only in
+	// the logs (BUILD-2318). Set to OutcomeConverted or OutcomeConvertedWithWarnings.
+	ConversionOutcomeAnnotation = "buildconfig-to-shipwright/conversion-outcome"
 
 	ConfigMapsRFE = "https://issues.redhat.com/browse/BUILD-1745"
 	SecretsRFE    = "https://issues.redhat.com/browse/BUILD-1744"
@@ -53,9 +57,53 @@ const (
 	ForcePullFlagS2iRFE = "https://issues.redhat.com/browse/BUILD-1606"
 )
 
+// OutcomeState is the disposition of a single BuildConfig conversion. Every
+// BuildConfig ends in exactly one state (BUILD-2318).
+type OutcomeState string
+
+const (
+	// OutcomeConverted: a Shipwright Build was generated with no warnings.
+	OutcomeConverted OutcomeState = "converted"
+	// OutcomeConvertedWithWarnings: a Build was generated, but something was
+	// dropped or needs review — the warnings are in the logs.
+	OutcomeConvertedWithWarnings OutcomeState = "converted-with-warnings"
+	// OutcomeSkipped: the BuildConfig was intentionally not converted (e.g. an
+	// unsupported strategy or a missing output image). It is passed through
+	// unchanged.
+	OutcomeSkipped OutcomeState = "skipped"
+	// OutcomeFailed: conversion hit an error. The BuildConfig is passed through
+	// unchanged so the rest of the migration can continue (crane aborts the
+	// whole run on any plugin error, so the plugin never returns one for a
+	// single-BuildConfig failure).
+	OutcomeFailed OutcomeState = "failed"
+)
+
+// Outcome describes how one BuildConfig conversion ended.
+type Outcome struct {
+	State  OutcomeState
+	Reason string // why it was skipped or failed; empty when converted
+	// Warnings holds every conversion warning recorded while producing this
+	// Build, so a converted-with-warnings Outcome is self-describing and a
+	// caller (e.g. the BUILD-2319 report) need not re-parse logs. Empty for a
+	// clean conversion; not populated for skipped/failed outcomes.
+	Warnings []string
+}
+
+// outcomeConverted is a convenience for a successful conversion; State is set to
+// converted-with-warnings later if any warning was recorded.
+func outcomeConverted() Outcome            { return Outcome{State: OutcomeConverted} }
+func outcomeSkipped(reason string) Outcome { return Outcome{State: OutcomeSkipped, Reason: reason} }
+func outcomeFailed(reason string) Outcome  { return Outcome{State: OutcomeFailed, Reason: reason} }
+
 type Converter struct {
 	Log  logrus.FieldLogger
 	Opts PluginOptionalFields
+
+	// warnings collects the conversion warnings recorded via warnf/warn/errorf
+	// so a conversion can be classified as converted-with-warnings and the
+	// messages surfaced on the Outcome. It accumulates across the Converter's
+	// lifetime; Convert slices out the per-BuildConfig warnings by index.
+	warnings []string
 
 	// assignedNames tracks generated names (keyed by kind/namespace/name) so
 	// that distinct originals resolving to the same sanitized name within a
@@ -76,7 +124,7 @@ type Converter struct {
 func (c *Converter) uniqueName(kind, namespace, original string) string {
 	name, changed := sanitizeDNS1123Label(original)
 	if changed {
-		c.Log.Warnf("Generated %s name %q is not a valid DNS-1123 label of at most %d characters — using %q instead", kind, original, maxGeneratedNameLength, name)
+		c.warnf("Generated %s name %q is not a valid DNS-1123 label of at most %d characters — using %q instead", kind, original, maxGeneratedNameLength, name)
 	}
 
 	if c.assignedNames == nil {
@@ -85,17 +133,44 @@ func (c *Converter) uniqueName(kind, namespace, original string) string {
 	key := kind + "/" + namespace + "/" + name
 	if owner, ok := c.assignedNames[key]; ok && owner != original {
 		name = withHashSuffix(name, original)
-		c.Log.Warnf("Generated %s name for %q collides with the name already generated for %q — using %q instead", kind, original, owner, name)
+		c.warnf("Generated %s name for %q collides with the name already generated for %q — using %q instead", kind, original, owner, name)
 		key = kind + "/" + namespace + "/" + name
 		if owner, ok := c.assignedNames[key]; ok && owner != original {
-			c.Log.Errorf("Hash-suffixed %s name %q for %q still collides with the name already generated for %q — resources may overwrite each other", kind, name, original, owner)
+			c.errorf("Hash-suffixed %s name %q for %q still collides with the name already generated for %q — resources may overwrite each other", kind, name, original, owner)
 		}
 	}
 	c.assignedNames[key] = original
 	return name
 }
 
-func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructured, error) {
+// warnf records a conversion warning: it logs at WARN and counts the warning so
+// the conversion can be classified as converted-with-warnings (BUILD-2318).
+func (c *Converter) warnf(format string, args ...interface{}) {
+	c.warnings = append(c.warnings, fmt.Sprintf(format, args...))
+	c.Log.Warnf(format, args...)
+}
+
+// warn is the non-formatting counterpart of warnf.
+func (c *Converter) warn(args ...interface{}) {
+	c.warnings = append(c.warnings, fmt.Sprint(args...))
+	c.Log.Warn(args...)
+}
+
+// errorf records a conversion problem that degrades the output but does not stop
+// conversion: it logs at ERROR and counts as a warning for outcome purposes.
+func (c *Converter) errorf(format string, args ...interface{}) {
+	c.warnings = append(c.warnings, fmt.Sprintf(format, args...))
+	c.Log.Errorf(format, args...)
+}
+
+// errorMsg is the non-formatting counterpart of errorf.
+func (c *Converter) errorMsg(args ...interface{}) {
+	c.warnings = append(c.warnings, fmt.Sprint(args...))
+	c.Log.Error(args...)
+}
+
+func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructured, Outcome) {
+	startWarnings := len(c.warnings)
 	b := &shipwrightv1beta1.Build{}
 	b.Name = c.uniqueName("Build", bc.Namespace, bc.Name)
 	b.Kind = "Build"
@@ -113,28 +188,31 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	case buildv1.DockerBuildStrategyType:
 		c.Log.Infof("Docker strategy detected for BuildConfig %s", bc.Name)
 		if err := c.processDockerStrategy(bc, b); err != nil {
-			return nil, err
+			return nil, outcomeFailed(err.Error())
 		}
 	case buildv1.SourceBuildStrategyType:
 		c.Log.Infof("Source strategy detected for BuildConfig %s", bc.Name)
 		if err := c.processSourceStrategy(bc, b); err != nil {
-			return nil, err
+			return nil, outcomeFailed(err.Error())
 		}
 	case buildv1.CustomBuildStrategyType:
-		c.Log.Warnf("Custom build strategy is not supported for conversion — passing BuildConfig %s through unchanged", bc.Name)
-		return nil, nil
+		reason := "Custom build strategy is not supported for conversion"
+		c.warnf("%s — passing BuildConfig %s through unchanged", reason, bc.Name)
+		return nil, outcomeSkipped(reason)
 	case buildv1.JenkinsPipelineBuildStrategyType:
-		c.Log.Warnf("JenkinsPipeline build strategy is not supported for conversion — passing BuildConfig %s through unchanged. Consider migrating to Tekton Pipelines directly.", bc.Name)
-		return nil, nil
+		reason := "JenkinsPipeline build strategy is not supported for conversion"
+		c.warnf("%s — passing BuildConfig %s through unchanged. Consider migrating to Tekton Pipelines directly.", reason, bc.Name)
+		return nil, outcomeSkipped(reason)
 	default:
-		return nil, fmt.Errorf("unknown build strategy type %q for BuildConfig %s", bc.Spec.Strategy.Type, bc.Name)
+		return nil, outcomeFailed(fmt.Sprintf("unknown build strategy type %q for BuildConfig %s", bc.Spec.Strategy.Type, bc.Name))
 	}
 
 	// Shipwright Builds require spec.output.image; a BuildConfig without an
 	// output image cannot be converted into a valid Build.
 	if bc.Spec.Output.To == nil || bc.Spec.Output.To.Name == "" {
-		c.Log.Warnf("BuildConfig %s has no output image (spec.output.to is missing or empty) — a Shipwright Build requires spec.output.image, passing BuildConfig through unchanged", bc.Name)
-		return nil, nil
+		reason := "BuildConfig has no output image (spec.output.to is missing or empty); a Shipwright Build requires spec.output.image"
+		c.warnf("%s — passing BuildConfig %s through unchanged", reason, bc.Name)
+		return nil, outcomeSkipped(reason)
 	}
 
 	// PullSecret → ServiceAccount
@@ -145,12 +223,14 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 		generatedSA = sa.Name
 		saUnstructured, err := toUnstructured(sa)
 		if err != nil {
-			return nil, fmt.Errorf("error converting ServiceAccount to unstructured: %w", err)
+			return nil, outcomeFailed(fmt.Sprintf("error converting ServiceAccount to unstructured: %v", err))
 		}
 		newResources = append(newResources, saUnstructured)
 	}
 
-	c.processSource(bc, b)
+	if err := c.processSource(bc, b); err != nil {
+		return nil, outcomeFailed(err.Error())
+	}
 	c.processOutput(bc, b)
 	c.processCompletionDeadline(bc, b)
 	c.processRunPolicy(bc)
@@ -160,17 +240,27 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processTriggers(bc, b)
 
 	if err := c.processResources(bc, b, generatedSA); err != nil {
-		return nil, err
+		return nil, outcomeFailed(err.Error())
 	}
+
+	// Classify the outcome now that every field has been processed, and record
+	// it on the Build so the disposition is observable in the output (BUILD-2318).
+	outcome := outcomeConverted()
+	if newWarnings := c.warnings[startWarnings:]; len(newWarnings) > 0 {
+		outcome.State = OutcomeConvertedWithWarnings
+		// Copy so the Outcome does not alias the Converter's growing slice.
+		outcome.Warnings = append([]string(nil), newWarnings...)
+	}
+	b.Annotations[ConversionOutcomeAnnotation] = string(outcome.State)
 
 	buildUnstructured, err := toUnstructured(b)
 	if err != nil {
-		return nil, fmt.Errorf("error converting Build to unstructured: %w", err)
+		return nil, outcomeFailed(fmt.Sprintf("error converting Build to unstructured: %v", err))
 	}
 
 	result := []unstructured.Unstructured{buildUnstructured}
 	result = append(result, newResources...)
-	return result, nil
+	return result, outcome
 }
 
 // copyLabels copies user-defined metadata.labels from the BuildConfig to the
@@ -253,7 +343,7 @@ func (c *Converter) boundedWarnings(warnings []string) string {
 		b.WriteString("\n")
 	}
 	b.WriteString(omittedWarningsNotice(len(warnings) - kept))
-	c.Log.Warnf("Conversion warnings exceeded %d bytes — %d of %d warnings were omitted from annotation %s; the full list is in the warnings logged above.", maxConversionWarningsBytes, len(warnings)-kept, len(warnings), ConversionWarningsAnnotation)
+	c.warnf("Conversion warnings exceeded %d bytes — %d of %d warnings were omitted from annotation %s; the full list is in the warnings logged above.", maxConversionWarningsBytes, len(warnings)-kept, len(warnings), ConversionWarningsAnnotation)
 	return b.String()
 }
 
@@ -289,7 +379,7 @@ func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwright
 			return fmt.Errorf("error resolving Docker strategy From field: %w", err)
 		}
 		if warning != "" {
-			c.Log.Warn(warning)
+			c.warn(warning)
 		}
 		b.Spec.ParamValues = append(b.Spec.ParamValues, shipwrightv1beta1.ParamValue{
 			Name:        RuntimeStageFromParamName,
@@ -338,7 +428,7 @@ func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwright
 		warnings := []string{}
 		warnf := func(format string, args ...interface{}) {
 			msg := fmt.Sprintf(format, args...)
-			c.Log.Warn(msg)
+			c.warn(msg)
 			warnings = append(warnings, msg)
 		}
 		for _, arg := range ds.BuildArgs {
@@ -466,7 +556,7 @@ func (c *Converter) processSourceStrategy(bc *buildv1.BuildConfig, b *shipwright
 			return fmt.Errorf("error resolving Source strategy From field: %w", err)
 		}
 		if warning != "" {
-			c.Log.Warn(warning)
+			c.warn(warning)
 		}
 		b.Spec.ParamValues = append(b.Spec.ParamValues, shipwrightv1beta1.ParamValue{
 			Name:        "builder-image",
@@ -481,13 +571,13 @@ func (c *Converter) processSourceStrategy(bc *buildv1.BuildConfig, b *shipwright
 
 	// Warnings for unsupported features
 	if ss.Scripts != "" {
-		c.Log.Warnf("Custom scripts are not yet supported in the Source-to-Image ClusterBuildStrategy in Shipwright. RFE: %s", CustomScriptsRFE)
+		c.warnf("Custom scripts are not yet supported in the Source-to-Image ClusterBuildStrategy in Shipwright. RFE: %s", CustomScriptsRFE)
 	}
 	if ss.Incremental != nil && *ss.Incremental {
-		c.Log.Warnf("Incremental build is not yet supported in the Source-to-Image ClusterBuildStrategy in Shipwright. RFE: %s", IncrementalBuildRFE)
+		c.warnf("Incremental build is not yet supported in the Source-to-Image ClusterBuildStrategy in Shipwright. RFE: %s", IncrementalBuildRFE)
 	}
 	if ss.ForcePull {
-		c.Log.Warnf("ForcePull flag is not yet supported in the Source-to-Image ClusterBuildStrategy in Shipwright. RFE: %s", ForcePullFlagS2iRFE)
+		c.warnf("ForcePull flag is not yet supported in the Source-to-Image ClusterBuildStrategy in Shipwright. RFE: %s", ForcePullFlagS2iRFE)
 	}
 	// Volumes — converted to Build spec volumes under their original names.
 	// Shipwright rejects the Build (Registered=False, reason UndefinedVolume)
@@ -517,17 +607,17 @@ func (c *Converter) processStrategyVolumes(bc *buildv1.BuildConfig, volumes []bu
 		c.Log.Infof("Processing volume %q for BuildConfig %s", bcVolume.Name, bc.Name)
 
 		if bcVolume.Name == "" {
-			c.Log.Warnf("Skipping volume with empty name for BuildConfig %s: the Shipwright Build API requires volumes to be named", bc.Name)
+			c.warnf("Skipping volume with empty name for BuildConfig %s: the Shipwright Build API requires volumes to be named", bc.Name)
 			continue
 		}
 		if seen[bcVolume.Name] {
-			c.Log.Warnf("Skipping duplicate volume %q for BuildConfig %s: a volume with this name was already converted", bcVolume.Name, bc.Name)
+			c.warnf("Skipping duplicate volume %q for BuildConfig %s: a volume with this name was already converted", bcVolume.Name, bc.Name)
 			continue
 		}
 
 		volumeSource, err := convertBuildVolumeSource(bcVolume.Source)
 		if err != nil {
-			c.Log.Warnf("Skipping volume %q for BuildConfig %s: %v", bcVolume.Name, bc.Name, err)
+			c.warnf("Skipping volume %q for BuildConfig %s: %v", bcVolume.Name, bc.Name, err)
 			continue
 		}
 
@@ -550,7 +640,7 @@ func (c *Converter) processStrategyVolumes(bc *buildv1.BuildConfig, volumes []bu
 		if len(paths) > 0 {
 			destinations = "original BuildConfig destination paths: " + strings.Join(paths, ", ")
 		}
-		c.Log.Warnf("Volume %q was converted, but the Build will fail validation (reason: UndefinedVolume) until you: (1) add an overridable volume named '%s' to your ClusterBuildStrategy copy — volumes: [{name: %s, overridable: true, emptyDir: {}}] (placeholder source; the converted Build's override supplies the real Secret/ConfigMap), (2) add a volumeMount for '%s' on the strategy build step (%s), (3) point the Build at the strategy copy via spec.strategy.name. See %s.", bcVolume.Name, bcVolume.Name, bcVolume.Name, bcVolume.Name, destinations, VolumeMigrationDoc)
+		c.warnf("Volume %q was converted, but the Build will fail validation (reason: UndefinedVolume) until you: (1) add an overridable volume named '%s' to your ClusterBuildStrategy copy — volumes: [{name: %s, overridable: true, emptyDir: {}}] (placeholder source; the converted Build's override supplies the real Secret/ConfigMap), (2) add a volumeMount for '%s' on the strategy build step (%s), (3) point the Build at the strategy copy via spec.strategy.name. See %s.", bcVolume.Name, bcVolume.Name, bcVolume.Name, bcVolume.Name, destinations, VolumeMigrationDoc)
 	}
 	return converted
 }
@@ -560,7 +650,7 @@ func (c *Converter) processStrategyVolumes(bc *buildv1.BuildConfig, volumes []bu
 // against the strategy, so conversion alone leaves the Build failing
 // validation until the strategy declares the volumes.
 func (c *Converter) warnStrategyVolumesRejected(strategyLabel string) {
-	c.Log.Warnf("Volumes were converted to Build spec volumes, but the shipped %s ClusterBuildStrategy does not declare them: Shipwright will reject the Build (Registered=False, reason: UndefinedVolume) until a matching volume with 'overridable: true' is added to a copy of the strategy. See %s.", strategyLabel, VolumeMigrationDoc)
+	c.warnf("Volumes were converted to Build spec volumes, but the shipped %s ClusterBuildStrategy does not declare them: Shipwright will reject the Build (Registered=False, reason: UndefinedVolume) until a matching volume with 'overridable: true' is added to a copy of the strategy. See %s.", strategyLabel, VolumeMigrationDoc)
 }
 
 // convertBuildVolumeSource converts an OpenShift BuildVolumeSource into the
@@ -612,7 +702,7 @@ func (c *Converter) generateServiceAccount(bc *buildv1.BuildConfig, pullSecret *
 	// visible here: each conversion emits the ServiceAccount carrying only its
 	// own pull secret, and applying them in sequence keeps only the last one.
 	if bc.Spec.ServiceAccount != "" {
-		c.Log.Warnf("BuildConfig %s converts pull secret %q into ServiceAccount %q, which it may share with other BuildConfigs — pull secrets from BuildConfigs sharing this ServiceAccount are not merged, so review the generated imagePullSecrets before applying", bc.Name, pullSecret.Name, saName)
+		c.warnf("BuildConfig %s converts pull secret %q into ServiceAccount %q, which it may share with other BuildConfigs — pull secrets from BuildConfigs sharing this ServiceAccount are not merged, so review the generated imagePullSecrets before applying", bc.Name, pullSecret.Name, saName)
 	}
 
 	if c.serviceAccounts == nil {
@@ -670,14 +760,21 @@ func mergePullSecret(sa *corev1.ServiceAccount, secretName string) {
 	}
 }
 
-func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) {
+// processSource maps the BuildConfig source onto the Build. It returns an error
+// when the source cannot be represented in Shipwright at all (multiple source
+// types, an extracted binary archive, multiple image sources, or an
+// unresolvable image) — those leave the Build with no usable source, so the
+// caller fails the whole conversion rather than shipping an incomplete Build
+// (BUILD-2318). Degradations that still yield a usable source (a dropped inline
+// Dockerfile, ignored image As/Paths, an absent source) are warnings, not errors.
+func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) error {
 	git := bc.Spec.Source.Git
 	binary := bc.Spec.Source.Binary
 	images := bc.Spec.Source.Images
 	dockerfile := bc.Spec.Source.Dockerfile
 
 	if dockerfile != nil && bc.Spec.Strategy.Type == buildv1.DockerBuildStrategyType {
-		c.Log.Error("Inline Dockerfile is not supported in buildah strategy. Consider moving it to a separate file.")
+		c.errorMsg("Inline Dockerfile is not supported in buildah strategy. Consider moving it to a separate file.")
 	}
 
 	sourceCount := 0
@@ -692,13 +789,12 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	}
 
 	if sourceCount > 1 {
-		c.Log.Errorf("Multiple source types are not supported in a single build in Shipwright. BuildConfig: %s", bc.Name)
-		return
+		return fmt.Errorf("multiple source types are not supported in a single build in Shipwright (BuildConfig %s)", bc.Name)
 	}
 
 	if sourceCount == 0 {
-		c.Log.Warnf("No source type specified for BuildConfig: %s", bc.Name)
-		return
+		c.warnf("No source type specified for BuildConfig: %s", bc.Name)
+		return nil
 	}
 
 	if git != nil {
@@ -730,22 +826,20 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 			},
 		}
 		if bc.Spec.Source.Binary.AsFile == "" {
-			c.Log.Errorf("Binary archive source (extracted archive) is not supported in Shipwright, only single-file binary sources (asFile). BuildConfig: %s", bc.Name)
-			return
+			return fmt.Errorf("binary archive source (extracted archive) is not supported in Shipwright, only single-file binary sources (asFile) (BuildConfig %s)", bc.Name)
 		}
 		c.Log.Infof("Processing binary source as single file (asFile: %s). BuildConfig: %s", bc.Spec.Source.Binary.AsFile, bc.Name)
 		b.Spec.Source = source
 	} else if len(images) > 0 {
 		if len(images) > 1 {
-			c.Log.Errorf("Multiple image sources are not supported in Shipwright. BuildConfig: %s", bc.Name)
-			return
+			return fmt.Errorf("multiple image sources are not supported in Shipwright (BuildConfig %s)", bc.Name)
 		}
 		image := images[0]
 		if image.As != nil {
-			c.Log.Errorf("Image source 'As' field is not supported in Shipwright. BuildConfig: %s", bc.Name)
+			c.errorf("Image source 'As' field is not supported in Shipwright. BuildConfig: %s", bc.Name)
 		}
 		if image.Paths != nil {
-			c.Log.Errorf("Image source 'Paths' field is not supported in Shipwright. BuildConfig: %s", bc.Name)
+			c.errorf("Image source 'Paths' field is not supported in Shipwright. BuildConfig: %s", bc.Name)
 		}
 
 		namespace := image.From.Namespace
@@ -754,11 +848,10 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		}
 		imageRef, warning, err := resolveImageRef(string(image.From.Kind), image.From.Name, namespace, c.Opts)
 		if err != nil {
-			c.Log.Errorf("Failed to resolve image source: %v", err)
-			return
+			return fmt.Errorf("failed to resolve image source (BuildConfig %s): %w", bc.Name, err)
 		}
 		if warning != "" {
-			c.Log.Warn(warning)
+			c.warn(warning)
 		}
 
 		source := &shipwrightv1beta1.Source{
@@ -783,7 +876,7 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 			if destDir == "" {
 				destDir = "."
 			}
-			c.Log.Warnf("BuildConfig '%s' mounts ConfigMap '%s' to '%s' during build. Shipwright uses BuildVolume to mount ConfigMaps, which requires the ClusterBuildStrategy to define an overridable volume. To migrate: (1) add an overridable volume named '%s' in the ClusterBuildStrategy, (2) add a BuildVolume override in the Build spec referencing the ConfigMap, (3) update your Dockerfile to use 'RUN cp' instead of 'ADD/COPY' for ConfigMap files.", bc.Name, cm.ConfigMap.Name, destDir, cm.ConfigMap.Name)
+			c.warnf("BuildConfig '%s' mounts ConfigMap '%s' to '%s' during build. Shipwright uses BuildVolume to mount ConfigMaps, which requires the ClusterBuildStrategy to define an overridable volume. To migrate: (1) add an overridable volume named '%s' in the ClusterBuildStrategy, (2) add a BuildVolume override in the Build spec referencing the ConfigMap, (3) update your Dockerfile to use 'RUN cp' instead of 'ADD/COPY' for ConfigMap files.", bc.Name, cm.ConfigMap.Name, destDir, cm.ConfigMap.Name)
 		}
 	}
 	if b.Spec.Source != nil && len(bc.Spec.Source.Secrets) > 0 {
@@ -792,9 +885,11 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 			if destDir == "" {
 				destDir = "."
 			}
-			c.Log.Warnf("BuildConfig '%s' mounts secret '%s' to '%s' during build. Shipwright uses BuildVolume to mount secrets, which requires the ClusterBuildStrategy to define an overridable volume. To migrate: (1) add an overridable volume named '%s' in the ClusterBuildStrategy, (2) add a BuildVolume override in the Build spec referencing the secret, (3) update your Dockerfile to use 'RUN cp' instead of 'ADD/COPY' for secret files.", bc.Name, secret.Secret.Name, destDir, secret.Secret.Name)
+			c.warnf("BuildConfig '%s' mounts secret '%s' to '%s' during build. Shipwright uses BuildVolume to mount secrets, which requires the ClusterBuildStrategy to define an overridable volume. To migrate: (1) add an overridable volume named '%s' in the ClusterBuildStrategy, (2) add a BuildVolume override in the Build spec referencing the secret, (3) update your Dockerfile to use 'RUN cp' instead of 'ADD/COPY' for secret files.", bc.Name, secret.Secret.Name, destDir, secret.Secret.Name)
 		}
 	}
+
+	return nil
 }
 
 func (c *Converter) processGitProxyConfig(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) {
@@ -835,10 +930,10 @@ func (c *Converter) processOutput(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 				internalRegistryURL+"/"+namespace+"/"+name,
 				c.Opts.RegistryMapping,
 			)
-			c.Log.Warnf("Output ImageStreamTag %q resolved to fallback URL: %s", name, b.Spec.Output.Image)
+			c.warnf("Output ImageStreamTag %q resolved to fallback URL: %s", name, b.Spec.Output.Image)
 		}
 		if bc.Spec.Output.PushSecret == nil || bc.Spec.Output.PushSecret.Name == "" {
-			c.Log.Warn("No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.")
+			c.warn("No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.")
 		}
 	} else {
 		b.Spec.Output.Image = bc.Spec.Output.To.Name
@@ -861,11 +956,11 @@ func (c *Converter) processOutputImageLabels(bc *buildv1.BuildConfig, b *shipwri
 	labels := make(map[string]string, len(bc.Spec.Output.ImageLabels))
 	for _, il := range bc.Spec.Output.ImageLabels {
 		if il.Name == "" {
-			c.Log.Warn("Skipping output imageLabel with empty name")
+			c.warn("Skipping output imageLabel with empty name")
 			continue
 		}
 		if existing, ok := labels[il.Name]; ok && existing != il.Value {
-			c.Log.Warnf("Duplicate output imageLabel %q: overriding value %q with %q", il.Name, existing, il.Value)
+			c.warnf("Duplicate output imageLabel %q: overriding value %q with %q", il.Name, existing, il.Value)
 		}
 		labels[il.Name] = il.Value
 	}
@@ -887,12 +982,12 @@ func (c *Converter) processCompletionDeadline(bc *buildv1.BuildConfig, b *shipwr
 
 	seconds := *bc.Spec.CompletionDeadlineSeconds
 	if seconds <= 0 {
-		c.Log.Warnf("completionDeadlineSeconds %d on BuildConfig %s is not positive; leaving Build timeout unset",
+		c.warnf("completionDeadlineSeconds %d on BuildConfig %s is not positive; leaving Build timeout unset",
 			seconds, bc.Name)
 		return
 	}
 	if seconds > maxTimeoutSeconds {
-		c.Log.Warnf("completionDeadlineSeconds %d on BuildConfig %s exceeds the maximum representable timeout of %d seconds; leaving Build timeout unset",
+		c.warnf("completionDeadlineSeconds %d on BuildConfig %s exceeds the maximum representable timeout of %d seconds; leaving Build timeout unset",
 			seconds, bc.Name, maxTimeoutSeconds)
 		return
 	}
@@ -922,13 +1017,13 @@ func (c *Converter) processRunPolicy(bc *buildv1.BuildConfig) {
 		c.Log.Infof("BuildConfig %s uses runPolicy %q; Shipwright BuildRuns already run independently and concurrently, so build scheduling is unchanged",
 			bc.Name, policy)
 	case buildv1.BuildRunPolicySerial:
-		c.Log.Warnf("BuildConfig %s uses runPolicy %q, which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag",
+		c.warnf("BuildConfig %s uses runPolicy %q, which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag",
 			bc.Name, policy)
 	case buildv1.BuildRunPolicySerialLatestOnly:
-		c.Log.Warnf("BuildConfig %s uses runPolicy %q, which is dropped: OpenShift queued its builds and cancelled superseded ones so that only the latest ran, but Shipwright BuildRuns run concurrently and are never auto-cancelled. Serialize the runs and cancel superseded ones in your CI/CD pipeline if you depend on this",
+		c.warnf("BuildConfig %s uses runPolicy %q, which is dropped: OpenShift queued its builds and cancelled superseded ones so that only the latest ran, but Shipwright BuildRuns run concurrently and are never auto-cancelled. Serialize the runs and cancel superseded ones in your CI/CD pipeline if you depend on this",
 			bc.Name, policy)
 	default:
-		c.Log.Warnf("BuildConfig %s uses unrecognized runPolicy %q, which is dropped: Shipwright has no build scheduling policy and BuildRuns run concurrently",
+		c.warnf("BuildConfig %s uses unrecognized runPolicy %q, which is dropped: Shipwright has no build scheduling policy and BuildRuns run concurrently",
 			bc.Name, policy)
 	}
 }
@@ -953,7 +1048,7 @@ func (c *Converter) processSuccessfulBuildsHistoryLimit(bc *buildv1.BuildConfig,
 
 	v := *bc.Spec.SuccessfulBuildsHistoryLimit
 	if v < minSucceededLimit || v > maxSucceededLimit {
-		c.Log.Warnf("successfulBuildsHistoryLimit %d on BuildConfig %s/%s is outside the Shipwright retention.succeededLimit range [%d,%d]; leaving retention unset — migrated BuildRuns will not be auto-pruned",
+		c.warnf("successfulBuildsHistoryLimit %d on BuildConfig %s/%s is outside the Shipwright retention.succeededLimit range [%d,%d]; leaving retention unset — migrated BuildRuns will not be auto-pruned",
 			v, bc.Namespace, bc.Name, minSucceededLimit, maxSucceededLimit)
 		return
 	}
@@ -1072,12 +1167,12 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 	b.Annotations[BuildRunTemplateAnnotation] = string(templateYAML)
 
 	if len(stepNames) == 0 {
-		c.Log.Warnf("Build strategy %q is a custom mapping with unknown step names — stepResources were omitted from the BuildRun template in annotation %s. Add stepResources entries matching the strategy's step names to carry over the BuildConfig resource requirements (requests: %v, limits: %v).", b.Spec.Strategy.Name, BuildRunTemplateAnnotation, res.Requests, res.Limits)
+		c.warnf("Build strategy %q is a custom mapping with unknown step names — stepResources were omitted from the BuildRun template in annotation %s. Add stepResources entries matching the strategy's step names to carry over the BuildConfig resource requirements (requests: %v, limits: %v).", b.Spec.Strategy.Name, BuildRunTemplateAnnotation, res.Requests, res.Limits)
 		return nil
 	}
 
 	c.Log.Infof("Generated BuildRun template with resource requirements (requests: %v, limits: %v) in annotation %s", res.Requests, res.Limits, BuildRunTemplateAnnotation)
-	c.Log.Warnf("Resource requirements are not supported on Shipwright Build. Apply the BuildRun template from annotation %s (after review) or set stepResources on each BuildRun you create.", BuildRunTemplateAnnotation)
+	c.warnf("Resource requirements are not supported on Shipwright Build. Apply the BuildRun template from annotation %s (after review) or set stepResources on each BuildRun you create.", BuildRunTemplateAnnotation)
 
 	return nil
 }

@@ -856,12 +856,14 @@ func TestConvertBinaryArchiveSourceRejected(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	b := &shipwrightv1beta1.Build{}
-	jsonBytes, _ := json.Marshal(resp.NewResources[0].Object)
-	json.Unmarshal(jsonBytes, b)
-
-	if b.Spec.Source != nil && b.Spec.Source.Local != nil {
-		t.Error("expected no Local source for unsupported binary archive (asFile empty)")
+	// A binary archive without asFile cannot be represented as a Shipwright
+	// source, so the conversion fails and the BuildConfig is passed through
+	// unchanged rather than shipping a Build with no usable source (BUILD-2318).
+	if resp.IsWhiteOut {
+		t.Error("expected passthrough (IsWhiteOut=false) for unsupported binary archive")
+	}
+	if len(resp.NewResources) != 0 {
+		t.Errorf("expected no converted resources for unsupported binary archive, got %d", len(resp.NewResources))
 	}
 }
 
@@ -2072,8 +2074,8 @@ func TestConvertResourcesLogsWarning(t *testing.T) {
 	}`
 	bc := parseBuildConfigJSON(t, bcJSON)
 
-	if _, err := converter.Convert(bc); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if _, outcome := converter.Convert(bc); outcome.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
 	}
 
 	foundWarn := false
@@ -2141,9 +2143,9 @@ func TestConvertResourcesCustomStrategyOmitsStepResources(t *testing.T) {
 			}`
 			bc := parseBuildConfigJSON(t, bcJSON)
 
-			result, err := converter.Convert(bc)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			result, outcome := converter.Convert(bc)
+			if outcome.State == OutcomeFailed {
+				t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
 			}
 
 			b := &shipwrightv1beta1.Build{}

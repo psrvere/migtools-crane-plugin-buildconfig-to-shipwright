@@ -97,23 +97,33 @@ func (p *BuildConfigTransformPlugin) Run(request transform.PluginRequest) (trans
 		Opts: opts,
 	}
 
-	newResources, err := converter.Convert(bc)
-	if err != nil {
-		return transform.PluginResponse{}, fmt.Errorf("error converting BuildConfig %s: %w", bc.Name, err)
-	}
+	newResources, outcome := converter.Convert(bc)
+	passThrough := transform.PluginResponse{Version: string(transform.V1)}
 
-	if len(newResources) == 0 {
-		p.log().Warnf("BuildConfig %s was not converted — passing through unchanged", bc.Name)
+	switch outcome.State {
+	case OutcomeFailed:
+		// crane aborts the entire migration on any plugin error, so a single
+		// BuildConfig that fails to convert must not return one. Leave it
+		// unchanged and let the rest of the run continue (BUILD-2318).
+		p.log().Errorf("BuildConfig %s/%s failed to convert (%s) — leaving it unchanged so the rest of the migration can continue", bc.Namespace, bc.Name, outcome.Reason)
+		return passThrough, nil
+	case OutcomeSkipped:
+		p.log().Warnf("BuildConfig %s/%s was not converted (%s) — passing through unchanged", bc.Namespace, bc.Name, outcome.Reason)
+		return passThrough, nil
+	case OutcomeConverted, OutcomeConvertedWithWarnings:
+		p.log().Infof("BuildConfig %s/%s conversion outcome: %s", bc.Namespace, bc.Name, outcome.State)
 		return transform.PluginResponse{
-			Version: string(transform.V1),
+			Version:      string(transform.V1),
+			IsWhiteOut:   true,
+			NewResources: newResources,
 		}, nil
+	default:
+		// An unrecognized outcome state should never reach here. Fail safe:
+		// pass the BuildConfig through unchanged rather than white it out and
+		// ship whatever Convert returned for a state we do not understand.
+		p.log().Errorf("BuildConfig %s/%s produced unknown conversion outcome %q — passing through unchanged", bc.Namespace, bc.Name, outcome.State)
+		return passThrough, nil
 	}
-
-	return transform.PluginResponse{
-		Version:      string(transform.V1),
-		IsWhiteOut:   true,
-		NewResources: newResources,
-	}, nil
 }
 
 func (p *BuildConfigTransformPlugin) log() logrus.FieldLogger {
