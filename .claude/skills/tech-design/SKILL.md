@@ -162,6 +162,13 @@ printf '%s@%s:%s\n' "$(basename "$CP")" "$(git -C "$CP" rev-parse --short HEAD)"
 
 Without the commit, a local citation looks precise and is not.
 
+**Pin once, in a header table, not on every citation.** A spec that repeats
+`repo@sha:path:line` on thirty claims is the citation wall this skill's readers cut.
+List each repo and the commit it was read at in a single table under `## Context`, then
+cite `path:line` alone in the body. Grade A asks that the commit be recoverable for
+every claim, not that it sit adjacent to every line number, and one table satisfies that
+while keeping the prose readable.
+
 A story routed to `exposure-gap` or `plugin-gap` on grade C or D evidence carries a
 `[NEEDS CLARIFICATION]` marker rather than a confident plan.
 
@@ -344,7 +351,12 @@ jira issue list --jql "project = BUILD AND (summary ~ '<feature-keyword>' OR des
 # 2. Merged code. Blind spot: the symbol may be named nothing like the feature, and the
 #    work may live outside converter.go. Grep the package, not one file, and search for
 #    the behaviour as well as the name.
-grep -rn "<feature-keyword>" "<Target Repo>"
+#    Exclude .claude: the plugin repo keeps git worktrees under .claude/worktrees/, and
+#    each one is a full copy of the tree. Without the exclusion a single real hit arrives
+#    buried in one duplicate per worktree, and the file list alone can run past a hundred
+#    lines.
+grep -rn --exclude-dir=.claude --exclude-dir=vendor --exclude-dir=.git \
+  "<feature-keyword>" "<Target Repo>"
 
 # 3. Merged PRs. This is the one that finds delivered work. --state open cannot: a
 #    merged PR is closed, so searching open PRs alone reports "not started" on finished
@@ -428,7 +440,20 @@ Choosing the conversion walk for a plugin-behaviour story produces three links m
 1. **Engine** — does buildah or s2i support it, at the pinned tag?
 2. **API** — does the Shipwright Build API have a field for it?
 3. **Strategy** — does a ClusterBuildStrategy expose it?
-4. **Plugin** — does `converter.go` emit it, or warn-and-drop?
+4. **Plugin** — two questions, in this order. First, can the plugin *obtain* what it
+   would need: is the input in the BuildConfig itself, or does it require another
+   resource, a cluster lookup, or a flag that does not exist? Only then: does
+   `converter.go` emit it, or warn-and-drop?
+
+The Plugin link asks two questions because a mapping can be impossible rather than
+merely missing, and the difference decides whether the story has an implementation at
+all. `PluginRequest` carries one resource plus a flat `Extras` map (Crane Lib Repo,
+`transform/plugin.go`), and the plugin has no cluster access, so a story asking the
+converter to read a ServiceAccount, a Secret, or any sibling resource has nowhere to
+read it from no matter what the API and the strategy support. Answer availability
+first: a `plugin-gap` recorded against an input the plugin cannot see is really a
+not-implementable scope item, and belongs in `necessity_by_scope` with a `D-N`
+recording the constraint and its escape clause.
 
 **Plugin walk.** No upstream chain applies; the question is what the plugin does today
 and what the target can accept.
@@ -598,8 +623,13 @@ else
 fi
 # 2. Every section its phases require is present (see "What a spec must contain")
 grep -c "^## " "$SPEC"
-# 3. Every destination-needs row dispositioned, when that table is required
-sed -n '/^## Destination-needs/,/^## /p' "$SPEC" | grep "^|" | grep -vc "story:\|N/A:"   # want 0
+# 3. Every destination-needs row dispositioned, when that table is required.
+#    Strip the header and separator rows first. Both match "^|" and neither carries a
+#    disposition, so counting them made this check report 2 on a perfectly clean table
+#    and 0 was unreachable.
+sed -n '/^## Destination-needs/,/^## /p' "$SPEC" | grep "^|" \
+  | grep -v "^|[[:space:]]*source field" | grep -v "^|[-|[:space:]]*$" \
+  | grep -vc "story:\|N/A:"   # want 0
 # 4. Every D-N heading has a body
 grep -c "^### D-[0-9]" "$SPEC"
 ```
@@ -733,6 +763,8 @@ ceremony_class: <trivial|bounded|forked>
 ceremony_signal: <the numbered signal that decided the class, or "none — default">
 ceremony_upgraded_from: <omit unless the class ratcheted mid-run>
 necessity: <proceed|already-done|not-needed|superseded-by BUILD-XXXX>
+necessity_by_scope: <omit unless the story bundles several requests; otherwise one entry
+  per scope item, each ending in its own terminal outcome — see Phase 2>
 capability: <engine-gap|api-gap|exposure-gap|plugin-gap|prior-art-found|already-supported>
 evidence_grade: <A|B|C|D>
 ---
