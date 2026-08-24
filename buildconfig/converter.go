@@ -938,7 +938,8 @@ func (c *Converter) processOutput(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	if bc.Spec.Output.To == nil {
 		return
 	}
-	if bc.Spec.Output.To.Kind == "ImageStreamTag" {
+	isImageStreamTag := bc.Spec.Output.To.Kind == "ImageStreamTag"
+	if isImageStreamTag {
 		namespace := bc.Spec.Output.To.Namespace
 		if namespace == "" {
 			namespace = bc.Namespace
@@ -958,15 +959,31 @@ func (c *Converter) processOutput(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 			)
 			c.warnf("Output ImageStreamTag %q resolved to fallback URL: %s", name, b.Spec.Output.Image)
 		}
-		if bc.Spec.Output.PushSecret == nil || bc.Spec.Output.PushSecret.Name == "" {
-			c.warnf("%s", "No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.")
+		// A push that no longer lands on the internal registry never updates the
+		// source ImageStream, so any Deployment or DeploymentConfig watching it
+		// to roll out silently stops firing (BUILD-2316, D-4). The check is the
+		// registry prefix, not the exact path: a redirect that keeps the prefix
+		// but changes the imagestream path is an accepted blind spot (D-4), since
+		// the common redirect — to an external registry — always drops the prefix.
+		if !strings.HasPrefix(b.Spec.Output.Image, internalRegistryURL+"/") {
+			c.warnf("Output image for ImageStreamTag %q was redirected off the internal registry to %q; the ImageStream will no longer be updated, so any Deployment or DeploymentConfig watching it to roll out will stop firing.", namespace+"/"+name, b.Spec.Output.Image)
 		}
 	} else {
 		b.Spec.Output.Image = bc.Spec.Output.To.Name
 	}
 
+	// The push credential is carried across only when the BuildConfig names one;
+	// the plugin cannot read the builder ServiceAccount to derive it (BUILD-2316,
+	// D-5). When none is carried, warn on both output kinds rather than only on
+	// ImageStreamTag (D-3), with the remedy that fits each: an internal-registry
+	// push needs a ServiceAccount with registry access, an external-registry push
+	// needs a real registry credential secret.
 	if bc.Spec.Output.PushSecret != nil && bc.Spec.Output.PushSecret.Name != "" {
 		b.Spec.Output.PushSecret = &bc.Spec.Output.PushSecret.Name
+	} else if isImageStreamTag {
+		c.warnf("%s", "No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.")
+	} else {
+		c.warnf("%s", "No explicit pushSecret found for DockerImage output. The converted Build cannot push to the external registry unless spec.output.pushSecret is set to a registry credential secret.")
 	}
 
 	c.processOutputImageLabels(bc, b)
