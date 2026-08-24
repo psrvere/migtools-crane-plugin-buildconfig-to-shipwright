@@ -36,7 +36,7 @@ func (p *BuildConfigTransformPlugin) Metadata() transform.PluginMetadata {
 			},
 			{
 				FlagName: ImageStreamMappingFlag,
-				Help:     "Map of ImageStreamTag references to concrete image URLs, format: namespace/name:tag=registry/image:tag",
+				Help:     "Map of ImageStreamTag or ImageStreamImage references, and bare DockerImage names that relied on ImageStream lookupPolicy.local, to concrete image URLs, format: namespace/name:tag=registry/image:tag (digest form: namespace/name@sha256:...=...)",
 				Example:  "myns/mystream:latest=quay.io/myorg/myimage:latest",
 			},
 			{

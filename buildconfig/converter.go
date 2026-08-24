@@ -186,6 +186,16 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 			bc.Spec.ServiceAccount, bc.Namespace, bc.Name)
 	}
 
+	// Inline Dockerfile → ConfigMap, before processSource so a BuildConfig skipped
+	// above never emits an orphan ConfigMap. Appended after the ServiceAccount.
+	if cm := c.processInlineDockerfile(bc, b); cm != nil {
+		cmUnstructured, err := toUnstructured(cm)
+		if err != nil {
+			return nil, outcomeFailed(fmt.Sprintf("error converting inline-Dockerfile ConfigMap to unstructured: %v", err))
+		}
+		newResources = append(newResources, cmUnstructured)
+	}
+
 	if err := c.processSource(bc, b); err != nil {
 		return nil, outcomeFailed(err.Error())
 	}
@@ -764,43 +774,20 @@ func mergePullSecret(sa *corev1.ServiceAccount, secretName string) {
 // types, an extracted binary archive, multiple image sources, or an
 // unresolvable image) — those leave the Build with no usable source, so the
 // caller fails the whole conversion rather than shipping an incomplete Build
-// (BUILD-2318). Degradations that still yield a usable source (a dropped inline
-// Dockerfile, ignored image As/Paths, an absent source) are warnings, not errors.
+// (BUILD-2318). Degradations that still yield a usable source (ignored image
+// As/Paths, an absent source, a non-git sourceSecret) are warnings, not errors.
+// The inline Dockerfile is handled earlier by processInlineDockerfile.
 func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) error {
 	git := bc.Spec.Source.Git
 	binary := bc.Spec.Source.Binary
 	images := bc.Spec.Source.Images
-	dockerfile := bc.Spec.Source.Dockerfile
 
-	// Inline Dockerfiles hold raw file contents, which Shipwright cannot represent:
-	// v1beta1 Source has no dockerfile field, and Source-to-Image builds the Dockerfile
-	// it generates itself. The content is unmigratable under either strategy — Docker
-	// errors because the resulting build would differ silently; Source warns because the
-	// field is inapplicable to S2I and usually signals the wrong strategy type.
-	// The empty check is not redundant: omitempty on a *string suppresses only a nil
-	// pointer, so an explicit `dockerfile: ""` unmarshals to a non-nil pointer to "".
-	// That carries no content to lose, and reporting it would tell the user to
-	// reconfigure a strategy over nothing.
-	//
-	// Custom and JenkinsPipeline strategies are absent by design, not oversight:
-	// Convert() returns before processSource for those, passing the BuildConfig
-	// through unchanged, so nothing is dropped and there is nothing to report.
-	//
-	// Either way the drop is recorded in c.warnings so it classifies the conversion
-	// as converted-with-warnings (BUILD-2318). The Docker case logs at ERROR to be
-	// louder, mirroring the uniqueName exception documented on warnf: it records the
-	// message explicitly rather than going through warnf, which logs at WARN.
-	if dockerfile != nil && *dockerfile != "" {
-		switch bc.Spec.Strategy.Type {
-		case buildv1.DockerBuildStrategyType:
-			msg := fmt.Sprintf("Inline Dockerfile is not supported in buildah strategy for BuildConfig %s/%s. Consider moving it to a separate file.", bc.Namespace, bc.Name)
-			c.warnings = append(c.warnings, msg)
-			c.Log.Errorf("%s", msg)
-		case buildv1.SourceBuildStrategyType:
-			c.warnf("BuildConfig %s/%s has an inline Dockerfile set on a Source strategy. "+
-				"Inline Dockerfiles are not used by Source-to-Image and were not migrated. "+
-				"If this was intended for a Docker strategy build, reconfigure the BuildConfig strategy type.", bc.Namespace, bc.Name)
-		}
+	// sourceSecret only authenticates git clones (ssh-privatekey / basic-auth). On a
+	// binary, image, or source-less BuildConfig it was inert on OpenShift too, so there
+	// is nothing to map — warn once, attributed to the BuildConfig, and drop it. This
+	// fires before the multiple-source error below so the drop is recorded either way.
+	if git == nil && bc.Spec.Source.SourceSecret != nil && bc.Spec.Source.SourceSecret.Name != "" {
+		c.warnf("BuildConfig %s/%s sets sourceSecret %q but has no git source; sourceSecret only authenticates git clones and was not migrated.", bc.Namespace, bc.Name, bc.Spec.Source.SourceSecret.Name)
 	}
 
 	sourceCount := 0
@@ -923,14 +910,24 @@ func (c *Converter) processGitProxyConfig(bc *buildv1.BuildConfig, b *shipwright
 		return
 	}
 	proxyConfig := bc.Spec.Source.Git.ProxyConfig
+	// OpenShift's build controller injects both the uppercase and lowercase forms
+	// (defaults.go@5235418:98-108); tools inside RUN steps that read only lowercase
+	// (curl ignores uppercase HTTP_PROXY by design) would otherwise see no proxy.
+	// Emit the lowercase twin right after each uppercase entry, same value, no dedupe.
 	if proxyConfig.HTTPProxy != nil && *proxyConfig.HTTPProxy != "" {
-		b.Spec.Env = append(b.Spec.Env, corev1.EnvVar{Name: "HTTP_PROXY", Value: *proxyConfig.HTTPProxy})
+		b.Spec.Env = append(b.Spec.Env,
+			corev1.EnvVar{Name: "HTTP_PROXY", Value: *proxyConfig.HTTPProxy},
+			corev1.EnvVar{Name: "http_proxy", Value: *proxyConfig.HTTPProxy})
 	}
 	if proxyConfig.HTTPSProxy != nil && *proxyConfig.HTTPSProxy != "" {
-		b.Spec.Env = append(b.Spec.Env, corev1.EnvVar{Name: "HTTPS_PROXY", Value: *proxyConfig.HTTPSProxy})
+		b.Spec.Env = append(b.Spec.Env,
+			corev1.EnvVar{Name: "HTTPS_PROXY", Value: *proxyConfig.HTTPSProxy},
+			corev1.EnvVar{Name: "https_proxy", Value: *proxyConfig.HTTPSProxy})
 	}
 	if proxyConfig.NoProxy != nil && *proxyConfig.NoProxy != "" {
-		b.Spec.Env = append(b.Spec.Env, corev1.EnvVar{Name: "NO_PROXY", Value: *proxyConfig.NoProxy})
+		b.Spec.Env = append(b.Spec.Env,
+			corev1.EnvVar{Name: "NO_PROXY", Value: *proxyConfig.NoProxy},
+			corev1.EnvVar{Name: "no_proxy", Value: *proxyConfig.NoProxy})
 	}
 }
 

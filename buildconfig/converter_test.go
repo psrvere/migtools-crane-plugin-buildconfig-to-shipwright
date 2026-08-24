@@ -13,6 +13,7 @@ import (
 	shipwrightv1beta1 "github.com/shipwright-io/build/pkg/apis/build/v1beta1"
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
@@ -159,20 +160,72 @@ func TestParseOptionalFields(t *testing.T) {
 
 func TestResolveImageRef(t *testing.T) {
 	tests := []struct {
-		name        string
-		kind        string
-		refName     string
-		namespace   string
-		opts        PluginOptionalFields
-		wantRef     string
-		wantWarning bool
-		wantErr     bool
+		name                string
+		kind                string
+		refName             string
+		namespace           string
+		opts                PluginOptionalFields
+		wantRef             string
+		wantWarning         bool
+		wantWarningContains string
+		wantErr             bool
 	}{
 		{
-			name:    "DockerImage returns name directly",
+			name:    "qualified DockerImage returns name directly",
 			kind:    "DockerImage",
-			refName: "golang:1.21-alpine",
-			wantRef: "golang:1.21-alpine",
+			refName: "docker.io/library/golang:1.21-alpine",
+			wantRef: "docker.io/library/golang:1.21-alpine",
+		},
+		{
+			name:                "bare DockerImage name warns about lookupPolicy.local",
+			kind:                "DockerImage",
+			refName:             "myapp:latest",
+			namespace:           "ns",
+			wantRef:             "myapp:latest",
+			wantWarning:         true,
+			wantWarningContains: "--imagestream-mapping ns/myapp:latest=",
+		},
+		{
+			name:      "bare DockerImage name resolved via imagestream-mapping",
+			kind:      "DockerImage",
+			refName:   "myapp:latest",
+			namespace: "ns",
+			opts: PluginOptionalFields{
+				ImageStreamMapping: map[string]string{"ns/myapp:latest": "quay.io/o/myapp:1"},
+			},
+			wantRef: "quay.io/o/myapp:1",
+		},
+		{
+			name:      "bare DockerImage name resolved via registry-mapping",
+			kind:      "DockerImage",
+			refName:   "myapp:latest",
+			namespace: "ns",
+			opts: PluginOptionalFields{
+				RegistryMapping: map[string]string{"myapp": "quay.io/o/myapp"},
+			},
+			wantRef: "quay.io/o/myapp:latest",
+		},
+		{
+			name:      "ImageStreamImage resolved via digest mapping key",
+			kind:      "ImageStreamImage",
+			refName:   "s@sha256:abc",
+			namespace: "ns",
+			opts: PluginOptionalFields{
+				ImageStreamMapping: map[string]string{"ns/s@sha256:abc": "quay.io/o/s@sha256:abc"},
+			},
+			wantRef: "quay.io/o/s@sha256:abc",
+		},
+		{
+			name:    "DockerImage with registry and path passes through unchanged",
+			kind:    "DockerImage",
+			refName: "quay.io/o/img:1",
+			wantRef: "quay.io/o/img:1",
+		},
+		{
+			name:    "DockerImage with a path but no registry passes through unchanged",
+			kind:    "DockerImage",
+			refName: "o/img:1",
+			wantRef: "o/img:1",
 		},
 		{
 			name:      "ImageStreamTag resolved via mapping",
@@ -258,7 +311,63 @@ func TestResolveImageRef(t *testing.T) {
 			if !tt.wantWarning && warning != "" {
 				t.Errorf("unexpected warning: %s", warning)
 			}
+			if tt.wantWarningContains != "" && !strings.Contains(warning, tt.wantWarningContains) {
+				t.Errorf("warning = %q, want it to contain %q", warning, tt.wantWarningContains)
+			}
 		})
+	}
+}
+
+// TestConvertBareDockerImageWarnsEndToEnd proves the bare-name warning is not only returned
+// by resolveImageRef but actually surfaced by the caller (c.warnf) and reflected in the
+// Build's conversion outcome. A caller that swallowed the returned warning would pass the
+// resolveImageRef unit test but fail here.
+func TestConvertBareDockerImageWarnsEndToEnd(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata":   map[string]interface{}{"name": "bare-app", "namespace": "myns"},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Git",
+					"git":  map[string]interface{}{"uri": "https://github.com/example/myapp.git"},
+				},
+				"strategy": map[string]interface{}{
+					"type": "Docker",
+					"dockerStrategy": map[string]interface{}{
+						"from": map[string]interface{}{"kind": "DockerImage", "name": "myapp:latest"},
+					},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/app:latest"},
+				},
+			},
+		}},
+	}
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.NewResources) < 1 {
+		t.Fatal("expected a converted Build")
+	}
+
+	var found bool
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "lookupPolicy.local") && strings.Contains(entry.Message, "--imagestream-mapping myns/myapp:latest=") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("bare DockerImage warning was not surfaced by the caller")
+	}
+
+	if got := resp.NewResources[0].GetAnnotations()[ConversionOutcomeAnnotation]; got != string(OutcomeConvertedWithWarnings) {
+		t.Errorf("%s = %q, want %q", ConversionOutcomeAnnotation, got, OutcomeConvertedWithWarnings)
 	}
 }
 
@@ -1159,19 +1268,126 @@ func TestConvertGitProxyConfig(t *testing.T) {
 	jsonBytes, _ := json.Marshal(resp.NewResources[0].Object)
 	json.Unmarshal(jsonBytes, b)
 
-	envByName := map[string]string{}
-	for _, env := range b.Spec.Env {
-		envByName[env.Name] = env.Value
+	// OpenShift injects both cases; tools inside RUN steps that read only lowercase
+	// (curl ignores uppercase HTTP_PROXY) would otherwise see no proxy. The order
+	// mirrors the build controller: uppercase then lowercase, per variable.
+	want := []corev1.EnvVar{
+		{Name: "HTTP_PROXY", Value: httpProxy},
+		{Name: "http_proxy", Value: httpProxy},
+		{Name: "HTTPS_PROXY", Value: httpsProxy},
+		{Name: "https_proxy", Value: httpsProxy},
+		{Name: "NO_PROXY", Value: noProxy},
+		{Name: "no_proxy", Value: noProxy},
+	}
+	if !reflect.DeepEqual(b.Spec.Env, want) {
+		t.Errorf("Env = %#v, want %#v", b.Spec.Env, want)
+	}
+}
+
+// TestConvertGitProxyConfigNoProxyOnly proves a BuildConfig that sets only noProxy
+// emits exactly the NO_PROXY / no_proxy pair and nothing for the unset variables.
+func TestConvertGitProxyConfigNoProxyOnly(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	noProxy := "localhost,127.0.0.1"
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata": map[string]interface{}{
+				"name":      "proxy-app",
+				"namespace": "myns",
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Git",
+					"git": map[string]interface{}{
+						"uri":     "https://github.com/example/myapp.git",
+						"noProxy": noProxy,
+					},
+				},
+				"strategy": map[string]interface{}{
+					"type":           "Docker",
+					"dockerStrategy": map[string]interface{}{},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{
+						"kind": "DockerImage",
+						"name": "quay.io/example/myapp:latest",
+					},
+				},
+			},
+		}},
 	}
 
-	if envByName["HTTP_PROXY"] != httpProxy {
-		t.Errorf("HTTP_PROXY = %q, want %q", envByName["HTTP_PROXY"], httpProxy)
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if envByName["HTTPS_PROXY"] != httpsProxy {
-		t.Errorf("HTTPS_PROXY = %q, want %q", envByName["HTTPS_PROXY"], httpsProxy)
+
+	b := &shipwrightv1beta1.Build{}
+	jsonBytes, _ := json.Marshal(resp.NewResources[0].Object)
+	json.Unmarshal(jsonBytes, b)
+
+	want := []corev1.EnvVar{
+		{Name: "NO_PROXY", Value: noProxy},
+		{Name: "no_proxy", Value: noProxy},
 	}
-	if envByName["NO_PROXY"] != noProxy {
-		t.Errorf("NO_PROXY = %q, want %q", envByName["NO_PROXY"], noProxy)
+	if !reflect.DeepEqual(b.Spec.Env, want) {
+		t.Errorf("Env = %#v, want %#v", b.Spec.Env, want)
+	}
+}
+
+// TestConvertGitProxyConfigAppendsAfterStrategyEnv proves the proxy env pairs are appended
+// after env the strategy already contributed, in order — the isolated DeepEqual cases above
+// pass on a 6-element slice regardless of whether the twins prepend or interleave, so this
+// pins the positional behaviour when other env coexists.
+func TestConvertGitProxyConfigAppendsAfterStrategyEnv(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	httpProxy := "http://proxy.example.com:8080"
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata":   map[string]interface{}{"name": "proxy-app", "namespace": "myns"},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Git",
+					"git": map[string]interface{}{
+						"uri":       "https://github.com/example/myapp.git",
+						"httpProxy": httpProxy,
+					},
+				},
+				"strategy": map[string]interface{}{
+					"type": "Docker",
+					"dockerStrategy": map[string]interface{}{
+						"env": []interface{}{
+							map[string]interface{}{"name": "FOO", "value": "bar"},
+						},
+					},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/myapp:latest"},
+				},
+			},
+		}},
+	}
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := &shipwrightv1beta1.Build{}
+	jsonBytes, _ := json.Marshal(resp.NewResources[0].Object)
+	json.Unmarshal(jsonBytes, b)
+
+	want := []corev1.EnvVar{
+		{Name: "FOO", Value: "bar"},
+		{Name: "HTTP_PROXY", Value: httpProxy},
+		{Name: "http_proxy", Value: httpProxy},
+	}
+	if !reflect.DeepEqual(b.Spec.Env, want) {
+		t.Errorf("Env = %#v, want the strategy env first, then the proxy pair: %#v", b.Spec.Env, want)
 	}
 }
 
@@ -3041,213 +3257,6 @@ func TestConvertRunPolicyWiring(t *testing.T) {
 			}
 			if got != tt.wantLog {
 				t.Errorf("runPolicy log emitted = %v, want %v", got, tt.wantLog)
-			}
-		})
-	}
-}
-
-// TestProcessSourceInlineDockerfile covers BUILD-2275. spec.source.dockerfile holds raw
-// Dockerfile contents, which Shipwright has no field for, so the content cannot be migrated
-// under either strategy: Docker errors, and Source — where the field was previously dropped
-// with no message at all — warns.
-func TestProcessSourceInlineDockerfile(t *testing.T) {
-	inline := "FROM scratch\nCOPY . /app"
-	empty := ""
-
-	tests := []struct {
-		name            string
-		strategyType    buildv1.BuildStrategyType
-		dockerfile      *string
-		wantSourceWarn  bool
-		wantDockerError bool
-	}{
-		{
-			name:           "Source strategy with an inline Dockerfile warns it was not migrated",
-			strategyType:   buildv1.SourceBuildStrategyType,
-			dockerfile:     &inline,
-			wantSourceWarn: true,
-		},
-		{
-			name:         "Source strategy without an inline Dockerfile stays silent",
-			strategyType: buildv1.SourceBuildStrategyType,
-		},
-		{
-			// omitempty on a *string suppresses only a nil pointer, so `dockerfile: ""`
-			// arrives as a non-nil pointer to "". There is no content to lose, and
-			// warning would tell the user to reconfigure a strategy over nothing.
-			name:         "Source strategy with an explicitly empty Dockerfile stays silent",
-			strategyType: buildv1.SourceBuildStrategyType,
-			dockerfile:   &empty,
-		},
-		{
-			name:            "Docker strategy with an inline Dockerfile still errors",
-			strategyType:    buildv1.DockerBuildStrategyType,
-			dockerfile:      &inline,
-			wantDockerError: true,
-		},
-		{
-			name:         "Docker strategy without an inline Dockerfile stays silent",
-			strategyType: buildv1.DockerBuildStrategyType,
-		},
-		{
-			name:         "Docker strategy with an explicitly empty Dockerfile stays silent",
-			strategyType: buildv1.DockerBuildStrategyType,
-			dockerfile:   &empty,
-		},
-		{
-			// Convert() returns before processSource for Custom and JenkinsPipeline, so
-			// those BuildConfigs pass through unchanged and nothing is dropped. Locking
-			// the switch's silence in here means relaxing that early return cannot
-			// quietly reintroduce a silent drop.
-			name:         "Custom strategy falls through the switch without a diagnostic",
-			strategyType: buildv1.CustomBuildStrategyType,
-			dockerfile:   &inline,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger, hook := logrustest.NewNullLogger()
-			c := &Converter{Log: logger}
-			bc := &buildv1.BuildConfig{
-				ObjectMeta: metav1.ObjectMeta{Name: "dockerfile-app", Namespace: "myns"},
-				Spec: buildv1.BuildConfigSpec{
-					CommonSpec: buildv1.CommonSpec{
-						Source: buildv1.BuildSource{
-							Dockerfile: tt.dockerfile,
-							Git:        &buildv1.GitBuildSource{URI: "https://example.com/repo.git"},
-						},
-						Strategy: buildv1.BuildStrategy{Type: tt.strategyType},
-					},
-				},
-			}
-
-			c.processSource(bc, &shipwrightv1beta1.Build{})
-
-			var sourceWarn, dockerErr *logrus.Entry
-			var messages []string
-			for _, entry := range hook.AllEntries() {
-				messages = append(messages, entry.Message)
-				if !strings.Contains(entry.Message, "nline Dockerfile") {
-					continue
-				}
-				switch entry.Level {
-				case logrus.WarnLevel:
-					sourceWarn = entry
-				case logrus.ErrorLevel:
-					dockerErr = entry
-				}
-			}
-
-			if (dockerErr != nil) != tt.wantDockerError {
-				t.Errorf("Docker-strategy error emitted = %v, want %v (logged: %q)", dockerErr != nil, tt.wantDockerError, messages)
-			}
-			// Fatal, not Error: the assertions below dereference these entries, so
-			// continuing past a missing log would panic and abort the whole binary.
-			if (sourceWarn != nil) != tt.wantSourceWarn {
-				t.Fatalf("Source-strategy warning emitted = %v, want %v (logged: %q)", sourceWarn != nil, tt.wantSourceWarn, messages)
-			}
-
-			// Both diagnostics must identify the BuildConfig by namespace and name.
-			// Names are unique only within a namespace, so without it a bulk
-			// multi-namespace migration produces unattributable log lines.
-			if tt.wantDockerError && !strings.Contains(dockerErr.Message, "myns/dockerfile-app") {
-				t.Errorf("Docker error = %q, want it to name the BuildConfig as myns/dockerfile-app", dockerErr.Message)
-			}
-			if !tt.wantSourceWarn {
-				return
-			}
-			if !strings.Contains(sourceWarn.Message, "myns/dockerfile-app") {
-				t.Errorf("message = %q, want it to name the BuildConfig as myns/dockerfile-app", sourceWarn.Message)
-			}
-			if !strings.Contains(sourceWarn.Message, "Source-to-Image") {
-				t.Errorf("message = %q, want it to name the strategy that ignores the Dockerfile", sourceWarn.Message)
-			}
-			if !strings.Contains(sourceWarn.Message, "reconfigure the BuildConfig strategy type") {
-				t.Errorf("message = %q, want it to tell the user how to fix the likely misconfiguration", sourceWarn.Message)
-			}
-		})
-	}
-}
-
-// TestConvertInlineDockerfileWiring proves both inline-Dockerfile diagnostics fire during a
-// real conversion, not only when processSource is called directly. Asserting the Docker
-// error here too means a regression that dropped it while still correctly suppressing the
-// Source warning cannot pass unnoticed.
-func TestConvertInlineDockerfileWiring(t *testing.T) {
-	tests := []struct {
-		name      string
-		strategy  map[string]interface{}
-		wantWarn  bool
-		wantError bool
-	}{
-		{
-			name: "Source strategy conversion reports the dropped inline Dockerfile",
-			strategy: map[string]interface{}{
-				"type": "Source",
-				"sourceStrategy": map[string]interface{}{
-					"from": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/builder:latest"},
-				},
-			},
-			wantWarn: true,
-		},
-		{
-			name: "Docker strategy conversion errors instead of emitting the Source warning",
-			strategy: map[string]interface{}{
-				"type":           "Docker",
-				"dockerStrategy": map[string]interface{}{},
-			},
-			wantError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger, hook := logrustest.NewNullLogger()
-			plugin := &BuildConfigTransformPlugin{Log: logger}
-			request := transform.PluginRequest{
-				Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
-					"apiVersion": "build.openshift.io/v1",
-					"kind":       "BuildConfig",
-					"metadata": map[string]interface{}{
-						"name":      "dockerfile-app",
-						"namespace": "myns",
-					},
-					"spec": map[string]interface{}{
-						"source": map[string]interface{}{
-							"type":       "Git",
-							"git":        map[string]interface{}{"uri": "https://example.com/repo.git"},
-							"dockerfile": "FROM scratch\nCOPY . /app",
-						},
-						"strategy": tt.strategy,
-						"output": map[string]interface{}{
-							"to": map[string]interface{}{"kind": "DockerImage", "name": "quay.io/example/app:latest"},
-						},
-					},
-				}},
-			}
-
-			if _, err := plugin.Run(request); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			gotWarn, gotError := false, false
-			for _, entry := range hook.AllEntries() {
-				if !strings.Contains(entry.Message, "nline Dockerfile") {
-					continue
-				}
-				switch entry.Level {
-				case logrus.WarnLevel:
-					gotWarn = true
-				case logrus.ErrorLevel:
-					gotError = true
-				}
-			}
-			if gotWarn != tt.wantWarn {
-				t.Errorf("Source-strategy warning emitted = %v, want %v", gotWarn, tt.wantWarn)
-			}
-			if gotError != tt.wantError {
-				t.Errorf("Docker-strategy error emitted = %v, want %v", gotError, tt.wantError)
 			}
 		})
 	}

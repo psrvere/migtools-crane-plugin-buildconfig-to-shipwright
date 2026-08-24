@@ -27,7 +27,7 @@ All other resource types are passed through unchanged.
 | Flag | Format | Purpose |
 |------|--------|---------|
 | `registry-mapping` | `old=new,old2=new2` | Rewrite image registry references |
-| `imagestream-mapping` | `ns/name:tag=registry/image:tag` | Resolve ImageStreamTag references to concrete image URLs |
+| `imagestream-mapping` | `ns/name:tag=registry/image:tag` | Resolve ImageStreamTag/ImageStreamImage references, and bare DockerImage names that relied on `lookupPolicy.local`, to concrete image URLs |
 | `default-build-strategy` | `docker=my-buildah,s2i=my-s2i` | Override default ClusterBuildStrategy names |
 | `search-registries` | `reg1,reg2` | Search registries for Buildah |
 | `insecure-registries` | `reg1,reg2` | Insecure registries for Buildah |
@@ -198,9 +198,9 @@ GOTOOLCHAIN=auto go test ./...
 
 ## Known limitations
 
-- **No live cluster access** — ImageStream references must be resolved via `--imagestream-mapping` or `--registry-mapping` flags. Without them, the plugin falls back to the internal OpenShift registry URL with a warning.
+- **No live cluster access** — ImageStream references must be resolved via `--imagestream-mapping` or `--registry-mapping` flags. Without them, the plugin falls back to the internal OpenShift registry URL with a warning. Bare image names such as `myapp:latest` that relied on ImageStream `lookupPolicy.local` are warned about and can be resolved with the same flag.
 - **Volumes** — BuildConfig volumes are not converted (Shipwright requires BuildStrategy-level support). A warning is emitted.
-- **Inline Dockerfiles** — Not supported for Docker strategy; must be in a separate file.
+- **Inline Dockerfiles** — the buildah strategy cannot consume Dockerfile content (BUILD-1495). The plugin preserves it in a ConfigMap named after the BuildConfig with a `-dockerfile` suffix and points at it from the Build annotation `buildconfig-to-shipwright/inline-dockerfile-configmap` (the annotation is the source of truth for the name); commit it to the repository before running the Build.
 - **Multiple source types** — Shipwright supports one source per Build. BuildConfigs with multiple sources produce an error.
 - **BuildRun not generated** — Only the Build definition is created. Triggering builds is left to the user or CI/CD system.
 
