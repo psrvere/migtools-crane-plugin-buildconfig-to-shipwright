@@ -37,12 +37,17 @@ func buildConfigRequestFromSpec(spec string) transform.PluginRequest {
 }
 
 // convertedDockerBC is a minimal BuildConfig that converts with no warnings:
-// runPolicy Parallel (Serial would warn), a git source, and a DockerImage output.
+// runPolicy Parallel (Serial would warn), a git source, and a DockerImage output
+// with an explicit pushSecret (BUILD-2316 warns when a DockerImage output names
+// no push secret, so a zero-warning fixture must carry one).
 const convertedDockerBC = `{
 	"runPolicy": "Parallel",
 	"source": {"type": "Git", "git": {"uri": "https://github.com/example/app.git"}},
 	"strategy": {"type": "Docker", "dockerStrategy": {}},
-	"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/app:latest"}}
+	"output": {
+		"to": {"kind": "DockerImage", "name": "quay.io/example/app:latest"},
+		"pushSecret": {"name": "quay-push-secret"}
+	}
 }`
 
 func TestConvertOutcomeConverted(t *testing.T) {

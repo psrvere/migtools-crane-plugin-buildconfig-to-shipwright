@@ -33,6 +33,32 @@ All other resource types are passed through unchanged.
 | `insecure-registries` | `reg1,reg2` | Insecure registries for Buildah |
 | `block-registries` | `reg1,reg2` | Blocked registries for Buildah |
 
+### Redirecting output images
+
+A BuildConfig pushes its output to the internal OpenShift registry
+(`image-registry.openshift-image-registry.svc:5000/<namespace>/<name>`). To send
+converted Builds to a registry the target cluster can reach, use the two mapping
+flags — there is no dedicated `--dest-registry` flag:
+
+- `registry-mapping` rewrites the registry prefix and **preserves the
+  `<namespace>/<name>` path**. Mapping the internal registry to `quay.io/acme`
+  turns an ImageStreamTag output in namespace `myapp` into
+  `quay.io/acme/myapp/webapp:latest` — three path segments.
+- Registries that accept only `<org>/<repo>` (Quay.io, Docker Hub) reject that
+  deeper path. For those, give an exact target per BuildConfig with
+  `imagestream-mapping` (`ns/name:tag=registry/image:tag`), which sets the output
+  reference. `registry-mapping` still runs afterward, so a prefix it matches on
+  the mapped value is rewritten too — keep that in mind when using both flags.
+
+Redirecting an ImageStreamTag output off the internal registry means the source
+ImageStream is no longer updated, so anything watching it to roll out (a
+Deployment or DeploymentConfig) stops firing. The converter warns when this
+happens. The check is a registry-prefix comparison, not a cluster-aware one: it
+fires when the resolved image no longer starts with
+`image-registry.openshift-image-registry.svc:5000/`. A redirect to a different
+in-cluster registry alias is not recognised as internal, and a redirect to a
+different path on the same internal registry is not caught.
+
 ## Usage with crane
 
 ### 1. Export the namespace
