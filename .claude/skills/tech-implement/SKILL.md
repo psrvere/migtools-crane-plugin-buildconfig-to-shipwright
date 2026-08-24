@@ -102,10 +102,34 @@ When the work is merged, remove it: `git -C "$CP" worktree remove "$WT"`.
 
 2. Read the design doc at `<Designs Directory>/BUILD-XXXX-*.md`.
 
+   Then check that it reached a resolved state. `/tech-design` ends every doc it writes
+   with a terminal sentinel; an unresolved doc is one whose own author flagged open
+   questions, and starting implementation against it is how an assumption nobody
+   confirmed reaches a PR.
+
+```bash
+sentinel="$(tail -1 "<the design doc>")"
+case "$sentinel" in
+  "NO UNRESOLVED MARKERS")
+    ;;
+  "UNRESOLVED MARKERS: "*)
+    echo "BLOCKED: $sentinel — resolve them in the design doc first"; exit 1 ;;
+  *)
+    echo "NOTE: no terminal sentinel; this doc predates the current template. Proceeding." ;;
+esac
+```
+
+   A doc with no sentinel predates the sentinel and is reported, not blocked, so
+   in-flight work triaged under the previous template keeps running.
+
 3. Read the current Jira state: `jira issue view BUILD-XXXX --plain --comments 5`.
 
-4. Extract from the design doc: **classification**, **repos and files to modify**,
-   **implementation plan**, **triage** (priority, points, blockers).
+4. Extract from the design doc frontmatter: **topic_class**, **ceremony_class**,
+   **necessity**, **capability**. From the body: the **Files Reference** table and the
+   **Proposed Change**.
+
+   Read priority, story points, blockers and dependencies from **Jira**, not from the
+   design doc. Jira owns story state; the design doc owns the design.
 
 5. Check for existing work before creating anything. Remote-only branches count — a fresh
    clone has no local branches at all:
@@ -148,7 +172,8 @@ Present a summary: "Implementing BUILD-XXXX. Design doc says: [summary]. Existin
 
 ## Story Point & Estimation Scale
 
-Used when setting Jira story points. If the design doc disagrees, reconcile during implementation.
+Used when setting Jira story points. Jira is the only source for points; the design doc
+does not carry them, so there is nothing to reconcile.
 
 | Points | Complexity | Est. Days | When to use |
 |--------|-----------|-----------|-------------|
@@ -178,10 +203,10 @@ files per repo, what changes in each, and the pattern being followed.
 
 ### Testing plan by classification
 
-Select the strategy under test from the Phase 1 classification. A `s2i-flag` issue tested
-against `buildah.yaml` produces a confidently wrong result.
+Select the strategy under test from the design doc's `topic_class` frontmatter field. A
+`s2i-flag` issue tested against `buildah.yaml` produces a confidently wrong result.
 
-| Classification | Catalog path (the PR target) |
+| `topic_class` | Catalog path (the PR target) |
 |---|---|
 | `buildah-flag` | `clusterBuildStrategy/buildah/buildah.yaml` |
 | `s2i-flag` | `clusterBuildStrategy/source-to-image/source-to-image.yaml` |

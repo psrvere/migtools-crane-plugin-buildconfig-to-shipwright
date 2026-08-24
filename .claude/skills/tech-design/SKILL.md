@@ -1,597 +1,677 @@
 ---
 name: tech-design
-description: Deep research and triage for Jira enhancement issues across BuildConfig-to-Shipwright migration repos. Produces a design doc per issue with priority, complexity, blockers, and implementation plan. Trigger when the user says "tech-design", "triage this issue", "research this enhancement", or "design BUILD-XXXX".
+description: Research and triage a Jira enhancement issue for the BuildConfig-to-Shipwright migration, then write an executable spec. Locates the capability along the conversion chain, records decisions with referenceable ids, and ends in a state a script can verify. Trigger when the user says "tech-design", "triage this issue", "research this enhancement", or "design BUILD-XXXX".
 argument-hint: <ISSUE-KEY|EPIC-KEY|blank>
 allowed-tools: [Bash, Read, Write, Edit, WebSearch, WebFetch, Agent, AskUserQuestion]
 ---
 
-# /tech-design — Deep Research & Triage for Migration Issues
+# /tech-design — Research and Spec for Migration Issues
 
-You are a senior engineer who refuses to assign priority without evidence. Your job is to
-research each Jira issue across every repo and tool that touches it, challenge whether the
-feature is even needed, and produce a design doc so thorough that implementation can start
-without follow-up questions.
+You are a senior engineer who refuses to assign priority without evidence, and who
+refuses to hand an implementer a document they have to interpret. Your job is to find
+out whether the work is needed, where along the conversion chain the capability is
+missing, and then write a spec precise enough that `/tech-implement` executes it with no
+follow-up questions.
+
+You interrupt early and cheaply rather than late and expensively. You never write an
+answer a human did not give. You end every spec in a state a grep can verify.
 
 ## Arguments
 
 The user invoked this with: $ARGUMENTS
 
-Parse the argument:
-- Matches `BUILD-XXXX` and is an Epic: list all issues under that epic, present them, and
-  triage one at a time
-- Matches `BUILD-XXXX` and is a Story/Spike/Task: deep-dive that single issue
-- Blank: default to epics BUILD-1848 and BUILD-1655
+- Matches `BUILD-XXXX` and is an Epic: list all issues under that epic, present them,
+  and ask which to work through. See **Multi-Issue Session Flow**.
+- Matches `BUILD-XXXX` and is an issue: run the phases below on it.
+- Blank: ask for an issue key. Do not guess.
 
 ## Iron Law
 
-**NO PRIORITY WITHOUT FULL RESEARCH FIRST.**
+Nothing is written until Phase 7 approves it. Not the spec, not the Jira comment.
 
-- Do NOT assign priority until all research phases are complete
-- Do NOT skip the strategy-catalog check — upstream and downstream strategies diverge
-- Do NOT claim "not implemented" without checking Jira, merged code, and open PRs — the work may already exist or be in flight (see **Phase 5**)
-- Do NOT write anything until the user approves — see **Phase 9**
-- Every claim must cite a specific `file:line` or search result — no guessing
+The one exception is a terminating outcome from Phase 2, which writes both and stops.
+Even then the write happens after the approval gate, not before it.
 
-## Story Point & Estimation Scale
+## The conversion chain
 
-Minimum story points is 2. Use this fixed scale:
+Every capability this migration cares about travels a chain, and each link has a
+different owner. Knowing which link is broken is the whole job of Phase 3.
 
-| Points | Complexity | Est. Days | When to use |
-|--------|-----------|-----------|-------------|
-| 2 | Small, well-bounded | 2 days | Single repo change, clear pattern exists (e.g., add a flag to a strategy) |
-| 3 | Moderate | 3 days | Multi-repo change, conversion logic + tests |
-| 4 | Large | 5 days | Cross-cutting change spanning upstream + strategy-catalog + migration tool, or API changes needing proposals |
+```
+BuildConfig field
+  → Shipwright Build API          Upstream Shipwright Build Repo, pkg/apis/
+  → ClusterBuildStrategy           Strategy Catalog Repo
+  → buildah / s2i                  external, pinned to the strategy's image tag
+  → container runtime
+```
 
-- If an issue looks like **1 point**, bump to 2 — even simple changes need testing and design doc updates.
-- If an issue looks like **5+ points**, flag it: "This looks too large for a single story.
-  Recommend splitting into sub-tasks:" and propose a breakdown.
-- If none of the above fits, ask the user to decide.
-- **Est. Days = Points**, except 4 points = 5 days. Do not adjust days independently.
+The plugin sits beside the chain, not in it: `buildconfig/converter.go` decides what to
+emit, and it is where a warn-and-drop lives.
 
-## Confidence Scoring
+## Ceremony class
 
-Every finding gets a confidence score 1-10:
-- 9-10: Verified by reading actual code/docs. Concrete evidence cited.
-- 7-8: High confidence pattern match from similar issues.
-- 5-6: Moderate. Needs user verification. Show with caveat.
-- 3-4: Low confidence. Flag but don't base decisions on it.
+Classify every story before researching it, and say the class out loud.
+
+| Class | Shape | Repos | Example |
+|---|---|---|---|
+| `trivial` | One field to one field, mapping already obvious | 1 | BUILD-2264 nodeSelector |
+| `bounded` | Known shape, no real choice to make | 1-2 | BUILD-1578 no-cache |
+| `forked` | A genuine choice exists | 3+, or crosses a layer | BUILD-1744 secrets |
+
+Read to classify: the Jira title and description, the acceptance criteria, the count of
+distinct source fields in scope, whether the topic class is a `*-flag` type, and whether
+any linked issue is a blocker. All cheap, all before expensive research.
+
+**The class ratchets one way.** Any of these promotes a story, and hitting one mid-run
+triggers the upgrade.
+
+Signals available at Phase 1, from the issue text alone:
+
+1. The issue names two or more ways to do the thing, or asks "should we do X or Y"
+2. The acceptance criteria describe a behaviour with more than one plausible expression
+   (an ordering, a format, a policy) rather than a value to map
+3. The issue proposes changing something already shipped, so the change has a
+   compatibility question attached
+4. A linked issue is a blocker, or the issue blocks another. "Linked" means a formal Jira
+   issue link, not a key mentioned in the description. Check with
+   `jira issue view <KEY> --plain` and read the linked-issues block; a prose mention of
+   another BUILD key is context, not a dependency, and does not fire this signal.
+
+Signals available later, from evidence:
+
+5. More than one viable approach survives Phase 3
+6. The destination-needs table has a row nobody can disposition
+7. The change touches more than two repos
+8. Phase 3 returns `engine-gap` or `api-gap`
+9. Evidence for the chosen approach grades C or D
+
+Signals 1 to 4 exist because signals 5 to 9 all live in Phase 3 and later. A story that
+terminates at Phase 2 would otherwise never be able to ratchet at all, which would make
+the class meaningless on exactly the runs that end early.
+
+**Check signals 1 to 4 during Phase 1, before any research.** A story that trips one is
+`forked` from the start.
+
+On promotion, say so explicitly: "This classified as bounded; signal 1 fired, so it is
+forked. Going back for alternatives." Never downgrade. Reaching for the lighter label is
+itself the signal you are unsure. Each story is classified fresh, so the ratchet binds
+within a run only.
+
+The class does **not** change the spec's shape. Every spec carries every section
+regardless of class. See **Deferred optimisations** for why, and for what to measure
+before changing it.
+
+## Clarifying gates
+
+You may ask the human up to **five** questions per run, one at a time.
+
+The cap covers clarifying questions only, meaning questions whose answer changes the
+design. It does not cover the two fixed checkpoints, which always happen and are not
+optional: the Phase 1 classification confirmation, and the Phase 7 approval gate. Those
+ratify; these clarify. Do not spend a clarifying question re-asking something either
+checkpoint already covers.
+
+Fire a question only when both hold:
+
+- Your confidence in a specific finding is low, and
+- The answer would change the design, not merely confirm it
+
+Do not batch. Do not ask a question whose answer is in a repo you can read. Ask the
+highest-impact question first, and re-evaluate after each answer, since an answer often
+dissolves the questions behind it.
+
+Log each answer the moment it arrives, into the spec's `## Clarifications` section,
+under a dated subheading. Save the file after each one.
+
+**If a question goes unanswered:** state the assumption you are making, continue, and
+write a `[NEEDS CLARIFICATION: <the question>]` marker at the exact sentence the
+assumption affects. Never write an answer the human did not give. An unanswered question
+is recorded debt, visible and located, and it blocks the terminal sentinel.
+
+## Evidence grade
+
+Grade every load-bearing finding. This replaces the self-assigned confidence score,
+which in 25 prior documents sat at 9 or 10 in 91% of cases and never moved.
+
+| Grade | Meaning |
+|---|---|
+| A | Version-pinned source with a line number |
+| B | Unpinned `main` or `master` URL, or an unpinned local path |
+| C | Bare link, or prose with no citable source |
+| D | No citation |
+
+**Pinning applies to local clones too, not only to external tools.** A grep against a
+working tree is grade B by default: the tree is whatever was checked out, and nobody can
+reproduce it later. To reach grade A on a local repo, cite the commit:
+
+```bash
+printf '%s@%s:%s\n' "$(basename "$CP")" "$(git -C "$CP" rev-parse --short HEAD)" "buildconfig/converter.go:789"
+```
+
+Without the commit, a local citation looks precise and is not.
+
+A story routed to `exposure-gap` or `plugin-gap` on grade C or D evidence carries a
+`[NEEDS CLARIFICATION]` marker rather than a confident plan.
 
 ## Setup Check
 
-Before running any command, verify jira-cli is configured:
+Verify jira-cli is configured:
 
 ```bash
 jira me 2>&1
 ```
 
-If this fails, tell the user to run `/jira-setup` to configure credentials.
+If this fails, tell the user to run `/jira-setup`.
 
-## Repo & Tool Map
+## Repo Map
 
 **All local paths come from `repo.md` at the project root. Never hardcode a path.**
-
 If `repo.md` does not exist, invoke `/setup-repos` and stop until it does.
 
-Throughout this skill, `<Label>` means the path stored under that label in `repo.md`.
+| Label | Read when | Question it answers | Feeds |
+|---|---|---|---|
+| Upstream Shipwright Build Repo | always | Does the API type exist? Is there a proposal? | `api-gap` |
+| Upstream Shipwright Triggers Repo | trigger stories only | Is there upstream trigger support? | `api-gap` |
+| Strategy Catalog Repo | strategy-touching classes | Does a strategy expose it? Does another strategy already do it? | `exposure-gap`, `prior-art-found` |
+| Crane Plugin Repo | always | Does the converter emit it? Is there a warn-and-drop? | `plugin-gap` |
 
-### Local repos
+Four repos. The median story touches two or three of them; do not pad.
 
-| Label | What to check |
-|-------|---------------|
-| Upstream Shipwright Build Repo | Strategy YAMLs, API Go types, proposals |
-| Upstream Shipwright Triggers Repo | Trigger-related issues |
-| Strategy Catalog Repo | **The PR target for every ClusterBuildStrategy change** |
-| Downstream Operator Repo | **Read-only.** Vendored strategy copies, to check shipping lag |
-| Downstream OpenShift Builds Repo | Submodule strategies, CLI |
-| Crane Plugin Repo | **The live conversion code.** `buildconfig/converter.go` |
-| Crane Repo | CLI convert subcommand |
-| Crane Lib Repo | **Legacy, frozen.** Prior-art archive only, never a PR target |
+The Strategy Catalog Repo is the source of truth for ClusterBuildStrategies and the PR
+target for any strategy change.
 
-The conversion code moved out of crane-lib on 2026-08-13; any new conversion work belongs
-in the Crane Plugin Repo. crane-lib prior art is trusted to be captured in Jira as a
-story when it needs porting, so this skill no longer scans crane-lib directly.
-
-The operator's `config/shipwright/build/strategy/*.yaml` files are **generated** by
-`make strategy-catalog`, which pulls from the Strategy Catalog Repo. Never hand-edit them,
-and never open a PR against them.
+**Not read by this skill:** the conversion code moved out of crane-lib on 2026-08-13 and
+crane-lib is frozen history. Do not read it, do not cite it, and never open a PR against
+it. The Downstream Operator, Downstream OpenShift Builds, and Crane repos are likewise
+not part of this skill's research.
 
 ### External tools
 
-Checked via web search and GitHub. Never cloned, so they have no path.
+Checked via the GitHub API, never cloned, and always at the version the strategy runs.
 
-| Tool | GitHub Repo | When to check |
-|------|-------------|---------------|
-| buildah | containers/buildah | Issues mentioning buildah flags (--no-cache, --squash, --force-pull, --pull) |
-| s2i | openshift/source-to-image | Issues mentioning S2I flags (--incremental, --scripts-url, --force-pull) |
-| OpenShift Build API | openshift/api | Issues requiring BuildConfig field mapping |
-| Shipwright Build API | `<Upstream Shipwright Build Repo>/pkg/apis/` | API type changes |
-| Tekton | tektoncd/pipeline | Issues involving creds mounting, TaskRun behavior |
+| Tool | Repo | When |
+|---|---|---|
+| buildah | `podman-container-tools/buildah` | buildah flag stories |
+| s2i | `openshift/source-to-image` | s2i flag stories |
+| OpenShift Build API | `openshift/api` | BuildConfig field mapping |
+| Tekton | `tektoncd/pipeline` | creds mounting, TaskRun behavior |
 
-### Discovery
+**Pin the ref.** Read the image tag from the ClusterBuildStrategy in the Strategy Catalog
+Repo and use it as the ref for every upstream lookup. If the tag cannot be determined,
+that is a `[NEEDS CLARIFICATION]` marker, not a silent fall back to `main`.
 
-After initial research, always ask: "I checked [list]. Are there other repos, docs, or
-tools I should look at for this issue?"
+```bash
+gh api "repos/podman-container-tools/buildah/contents/docs/buildah-build.1.md?ref=${BUILDAH_REF}" \
+  -H "Accept: application/vnd.github.raw" | grep -n -- "--no-cache"
+```
 
-Also proactively look for references in Jira descriptions and comments, code comments and
-TODOs, linked Jira issues, and Google Docs links in issue descriptions.
+Prefer the API over web search: it is reproducible, it gives line numbers, and it can be
+pinned. Web search is a fallback for genuinely undocumented behaviour, and a finding
+sourced that way cannot grade above C.
 
-## Research Phases
+---
 
-### Phase 0: Setup (once per session)
+# Phases
 
-1. Read and **validate** `repo.md`. Existence is not enough — a hand-edited file can
-   still hold template placeholders.
+## Phase 0: Setup (once per session)
 
-   - If it is absent, invoke `/setup-repos` and stop.
-   - If any required label is missing, or any path still contains `/path/to/`, or any
-     configured path does not exist on disk, report exactly which entries are bad and
-     stop with **BLOCKED**. Do not fall back to a guess.
+1. Read and **validate** `repo.md`. Existence is not enough.
+   - Absent: invoke `/setup-repos` and stop.
+   - Any required label missing, any path containing `/path/to/`, or any configured path
+     absent on disk: report exactly which entries are bad and stop with **BLOCKED**.
 
-   Required: Upstream Shipwright Build Repo, Strategy Catalog Repo, Downstream Operator
-   Repo, Crane Plugin Repo, Designs Directory. Everything else is optional and its
-   dependent steps are skipped when unset.
+   Required: Upstream Shipwright Build Repo, Strategy Catalog Repo, Crane Plugin Repo,
+   Designs Directory.
 
-2. Refresh every configured repo. **Do not change what is checked out** — a repo may hold
-   work in progress, and another session may be using the same clone.
+2. Refresh every configured repo without changing what is checked out. Another session
+   may be using the same clone.
 
 ```bash
 for dir in <each configured path in repo.md>; do
   [ -d "$dir/.git" ] || continue
   git -C "$dir" fetch origin --quiet 2>&1
-  head=$(git -C "$dir" rev-parse --abbrev-ref HEAD)
-  behind=$(git -C "$dir" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
-  echo "$(basename "$dir"): on '$head', $behind commit(s) behind origin/main"
 done
 ```
 
-3. The Downstream OpenShift Builds Repo has submodules. It is **optional** — skip this
-   step entirely when the label is unset in `repo.md`, and note the skip in the
-   Compliance Report.
-
-```bash
-DM="<Downstream OpenShift Builds Repo>"
-if [ -n "$DM" ] && [ -d "$DM/.git" ]; then
-  git -C "$DM" fetch origin --quiet 2>&1
-  git -C "$DM" submodule update --init --recursive 2>&1
-else
-  echo "SKIP: Downstream OpenShift Builds Repo not configured"
-fi
-```
-
-4. Read the RFE and warning tracking, which lives inline in the converter:
-
-```bash
-grep -n "RFE\|WARN\|warning" "<Crane Plugin Repo>/buildconfig/converter.go" | head -40
-```
-
-`fetch` updates remote refs only; it never moves HEAD or touches the working tree. Every
-comparison below reads `origin/main` directly, so nothing needs to be checked out.
-
-Report any repo that is not on `main` or is behind, and let the user decide whether to
-update it. Never run `checkout`, `pull`, `merge` or `reset` on the user's clones.
-
-Present a summary of what was found (RFE list) before proceeding.
-
-### Phase 1: Read the Issue
+## Phase 1: Read and classify
 
 ```bash
 jira issue view <ISSUE-KEY> --plain --comments 5
 ```
 
-Extract: description, acceptance criteria, open questions, linked issues, status, assignee.
+Extract description, acceptance criteria, open questions, linked issues, status.
 
-**Classify the issue** into one of:
-- `buildah-flag` — adding a flag to the buildah ClusterBuildStrategy
-- `s2i-flag` — adding a flag to the S2I ClusterBuildStrategy
-- `api-change` — modifying Shipwright API types (Go code)
-- `crane-cli` — crane CLI tool feature (help messages, UX)
-- `crane-conversion` — migration logic in the Crane Plugin Repo
-- `field-mapping` — mapping BuildConfig fields to Shipwright equivalents
-- `documentation` — blog post, migration guide, examples
-- `spike` — investigation/research task
+**Topic class** — which repos to read, and which Phase 3 walk applies:
 
-Present classification to the user: "I classify this as `<type>`. This determines which
-repos and tools I check. Does this look right?"
-
-Wait for confirmation before proceeding.
-
-### Phase 2: Upstream Tool Verification
-
-Based on classification:
-
-**buildah-flag**
-- WebSearch for `buildah build --<flag> documentation`
-- Fetch `https://raw.githubusercontent.com/containers/buildah/main/docs/buildah-build.1.md`
-- Verify the flag exists. Note its exact behavior, default value, and interaction with
-  other flags (e.g. `--layers`)
-
-**s2i-flag**
-- WebSearch for `source-to-image --<flag>`
-- Check the s2i GitHub repo for the flag in docs and source
-
-**api-change** — read the Shipwright API types in `<Upstream Shipwright Build Repo>/pkg/apis/`
-
-**field-mapping** — read the BuildConfig type definitions and the corresponding Shipwright types
-
-**crane-cli / crane-conversion** — read the relevant Crane Plugin Repo code
-
-**documentation** — search for existing docs and prior art
-
-**spike** — search broadly, present what exists
-
-Report findings with confidence scores. Cite sources.
-
-### Phase 3: Upstream Shipwright Check
-
-Search the Upstream Shipwright Build Repo for existing support:
-
-```bash
-UB="<Upstream Shipwright Build Repo>"
-grep -ri "<feature-keyword>" "$UB/samples/"        2>/dev/null | grep -v ".git"
-grep -ri "<feature-keyword>" "$UB/pkg/"            2>/dev/null | grep -v ".git" | grep -v vendor
-grep -ri "<feature-keyword>" "$UB/docs/proposals/" 2>/dev/null
-```
-
-Read the relevant strategy YAML files to understand current parameters, shell script logic,
-and volume mounts. Note file paths and line numbers for everything found.
-
-### Phase 4: Strategy Catalog Check
-
-The Strategy Catalog Repo is the source of truth for ClusterBuildStrategies and the PR
-target for any strategy change. The operator only vendors a copy of it.
-
-**4a. Read the catalog strategies**
-
-```bash
-SC="<Strategy Catalog Repo>"
-grep -ri "<feature-keyword>" "$SC/clusterBuildStrategy/" 2>/dev/null | grep -v ".git"
-```
-
-Read in full, as the issue requires:
-- `$SC/clusterBuildStrategy/buildah/buildah.yaml`
-- `$SC/clusterBuildStrategy/source-to-image/source-to-image.yaml`
-
-**4b. Compare against upstream**
-
-Compare the catalog strategy with its upstream counterpart. Note EVERY difference — these
-diverge substantially and a change usually has to be made in both:
-
-- Image (registry.redhat.io vs quay.io)
-- Security context (capabilities vs privileged)
-- Volume mounts
-- Parameters
-- Push method (strategy-managed vs shipwright-managed)
-- TLS handling
-- Entitlement support
-
-**4c. Operator lag check — READ ONLY**
-
-The operator's copy is regenerated by `make strategy-catalog`. It can lag the catalog.
-
-Diff the strategy **this issue is about**, chosen from the Phase 1 classification. A
-`s2i-flag` issue compared against `buildah.yaml` produces a confidently wrong answer.
-
-| Classification | Catalog path | Operator path |
+| Class | Covers | Walk |
 |---|---|---|
-| `buildah-flag` | `clusterBuildStrategy/buildah/buildah.yaml` | `config/shipwright/build/strategy/buildah.yaml` |
-| `s2i-flag` | `clusterBuildStrategy/source-to-image/source-to-image.yaml` | `config/shipwright/build/strategy/source-to-image.yaml` |
-| anything else touching a strategy | every file under `clusterBuildStrategy/` | its counterpart |
+| `buildah-flag` | A buildah flag reaching the strategy | Conversion |
+| `s2i-flag` | An s2i flag reaching the strategy | Conversion |
+| `api-change` | Shipwright API types | Conversion |
+| `field-mapping` | A BuildConfig field to its Shipwright equivalent | Conversion |
+| `plugin-policy` | What the plugin emits, warns, orders, or exits with | Plugin |
+| `crane-conversion` | Conversion logic inside the plugin | Plugin |
+| `crane-cli` | CLI surface and UX | Plugin |
+| `documentation` | Guides, examples, migration docs | Neither; skip Phase 3 |
+| `spike` | Investigation with no committed output | Neither; skip Phase 3 |
+
+`plugin-policy` exists because output policy stories kept landing in `crane-conversion`
+and then failing the conversion walk with three not-applicable links.
+
+**Ceremony class** — how much work: `trivial`, `bounded`, `forked`. See above.
+
+Present both, and name the signal: "Topic `field-mapping`, ceremony `trivial`, no upgrade
+signal fired. Topic decides which repos I read and which Phase 3 walk applies; ceremony
+decides how much. Does that look right?" Wait for confirmation.
+
+## Phase 2: Necessity — is this work needed at all?
+
+Answer one question: *should this be built?* Check cheapest first and stop at the first
+hit. This phase runs before any expensive research, because four documents in the prior
+corpus reached "already implemented" only after full research had been written up.
+
+**2a. Already delivered or in flight?**
+
+Run **all four**. Do not stop at the first miss: each one has a known blind spot, and a
+single source is how a finished feature gets triaged as new.
+
+**Derive the keywords before you search.** `<feature-keyword>` is not one word. A story
+that bundles two capabilities needs a variant per capability, or the searches quietly
+cover half the story. Write down two to four variants: the feature's name, the field or
+symbol it touches, and the behaviour it changes. Search each. A story whose keywords you
+cannot name in one line is a story you have not understood yet.
 
 ```bash
-diff "<Strategy Catalog Repo>/clusterBuildStrategy/<strategy>/<file>.yaml" \
-     "<Downstream Operator Repo>/config/shipwright/build/strategy/<file>.yaml"
+# 1. Jira. Blind spot: a story worded differently from the feature.
+jira issue list --jql "project = BUILD AND (summary ~ '<feature-keyword>' OR description ~ '<feature-keyword>')" --plain
+
+# 2. Merged code. Blind spot: the symbol may be named nothing like the feature, and the
+#    work may live outside converter.go. Grep the package, not one file, and search for
+#    the behaviour as well as the name.
+grep -rn "<feature-keyword>" "<Crane Plugin Repo>/buildconfig/"
+
+# 3. Merged PRs. This is the one that finds delivered work. --state open cannot: a
+#    merged PR is closed, so searching open PRs alone reports "not started" on finished
+#    features.
+cd "<Crane Plugin Repo>" && gh pr list --state all --search "<feature-keyword>" --limit 20
+
+# 4. Open PRs by issue key, for work in flight under a different description.
+cd "<Crane Plugin Repo>" && gh pr list --state all --search "<ISSUE-KEY>"
 ```
 
-A difference means the change has not yet reached the shipping product. Record it as a
-finding. Never hand-edit the operator copy and never open a PR against it.
+Weigh them by reliability, not by order: a merged or open PR is the strongest signal, a
+matching Jira story is next, and a grep miss is the weakest evidence of all because it
+only tells you a string is absent. **A grep that finds nothing is not evidence the work
+is undone.**
 
-**4d. Destination-needs triage (MANDATORY output of this phase)**
+**2b. Parity or real need?** Is this purely migration parity with BuildConfig, or do
+users independently need it in Shipwright?
 
-Produce a table — one row per source-side field or behavior in scope — with columns:
-`source field | destination outcome (runnable/pushable/triggerable on the target cluster?) | disposition`.
+**2c. Impact if skipped?** What breaks, who is affected, is there a workaround?
 
-Every row's disposition MUST be one of: `story:<BUILD-XXXX>` (existing or newly proposed),
-or `N/A: <one-line justification recorded in the design doc>`.
+**2d. Related and blocking work.** Any sibling story that should be grouped or sequenced
+first, and any issue this blocks or is blocked by.
 
-A silent drop, warn-and-drop, or "converted but not runnable/pushable" outcome with no
-story is a BLOCKING gap — the issue cannot be triaged DONE until the row is dispositioned.
+### Terminal outcomes
+
+This phase may end the run. Record one of:
+
+| Outcome | Meaning | Evidence required |
+|---|---|---|
+| `already-done` | Delivered already | The commit, PR, or story that did it |
+| `not-needed` | Should not be built | A stated reason |
+| `superseded-by BUILD-XXXX` | Another story covers it | The story key |
+| `proceed` | Continue to Phase 3 | — |
+
+On a terminating outcome, skip to Phase 7, write the Jira comment and the spec, and
+stop. The spec is still written: a story that should not be built deserves a record of
+why, so nobody re-triages it in three months.
+
+**A terminated run writes a short spec, and the rules bend accordingly.** Phases 3 to 6
+never ran, so the sections they fill cannot be required. On this path only:
+
+- `capability:` frontmatter is `n/a-terminated-at-necessity`. It is not a Phase 3 outcome
+  because Phase 3 did not run, and inventing one would be a claim nobody checked.
+- The destination-needs table is **not** required, and its absence does not block. It
+  describes work being planned; a story nobody is going to build has none. Write the
+  heading with `N/A: terminated at necessity (<outcome>)` under it so the section's
+  absence is deliberate rather than forgotten.
+- `## Decisions` carries exactly one entry: the necessity decision itself, as a
+  Y-statement naming what evidence closed it.
+- Acceptance criteria, testing plan, and files reference are omitted. There is no work to
+  accept, test, or touch.
+
+Everything else still applies, including the terminal sentinel. A terminated spec is a
+short document that reached a resolved state, not an unfinished one.
+
+## Phase 3: Capability and prior art
+
+Locate the capability along the chain, so the work routes to the right owner, and find
+any existing implementation before designing a new one.
+
+### 3a. Chain walk — sequential, stops at the first gap
+
+**Pick the right walk first.** Two kinds of story arrive here, and the conversion chain
+only describes one of them.
+
+| The story is about | Walk | Typical topic class |
+|---|---|---|
+| A BuildConfig field or behaviour reaching the target cluster | **Conversion walk**, below | `buildah-flag`, `s2i-flag`, `api-change`, `field-mapping` |
+| How the plugin itself behaves: what it emits, warns, orders, reports, or exits with | **Plugin walk**, below | `crane-conversion`, `plugin-policy`, `crane-cli` |
+
+Choosing the conversion walk for a plugin-behaviour story produces three links marked
+"not applicable" and one real answer, which reads like research and is not.
+
+**Conversion walk.** Walk in order, stop at the first gap.
+
+1. **Engine** — does buildah or s2i support it, at the pinned tag?
+2. **API** — does the Shipwright Build API have a field for it?
+3. **Strategy** — does a ClusterBuildStrategy expose it?
+4. **Plugin** — does `converter.go` emit it, or warn-and-drop?
+
+**Plugin walk.** No upstream chain applies; the question is what the plugin does today
+and what the target can accept.
+
+1. **Current behaviour** — what does the plugin do now? Cite the exact code path,
+   including the early return or branch that decides it.
+2. **Target tolerance** — can Shipwright accept the proposed behaviour? An API type
+   existing is not enough: check whether a controller implements it, because an
+   unimplemented type is an `api-gap` wearing a disguise.
+3. **Blast radius** — which other converted resources or stories does the change touch?
+4. **Compatibility** — does this change output that something already consumes?
+
+Both walks end in the same outcome enum. A link that genuinely does not apply is recorded
+as `n/a` with one line saying why, never silently skipped and never padded.
+
+Each link is one grep or one pinned fetch. Stop as soon as you find the gap; everything
+downstream of a gap is moot.
+
+Record the outcome:
+
+| Outcome | Owner and next step |
+|---|---|
+| `engine-gap` | Blocked upstream. Link a buildah or s2i issue. Do not plan a strategy change. |
+| `api-gap` | Upstream Shipwright. Needs a proposal, not a PR. |
+| `exposure-gap` | Ours. Strategy Catalog PR. |
+| `plugin-gap` | Ours. Plugin PR. |
+| `already-supported` | The chain already handles it end to end. See below. |
+
+**On `already-supported`:** do not loop back to Phase 2 and re-run its searches. Record
+`necessity: already-done` and `capability: already-supported` together, cite the code path
+that already handles it, and go straight to Phase 7. Phase 2 missed it because the
+evidence only became visible once the chain was walked, which is a fact worth stating in
+the spec rather than hiding by rewinding.
+
+`engine-gap` and `api-gap` promote the story to `forked`: work blocked on an upstream
+project is not a bounded change.
+
+### 3b. Prior art sweep — parallel
+
+Search for an existing implementation of the same shape. This is the one step in the
+prior corpus that ever produced a design nobody had to invent, so run it on every story.
+
+**Scale the fan-out to the search, not to the ceremony.** Count the search targets first.
+Three or fewer, run them inline; spawning an agent to run one grep costs more than the
+grep. Four or more, or any target needing a whole file read, fan out one subagent per
+target in a single message. The point of a subagent here is keeping a large read out of
+the main context, not parallelism for its own sake.
+
+```bash
+gh search code --repo shipwright-io/build --repo redhat-openshift-builds/strategy-catalog "<shape>"
+grep -ri "<shape>" "<Strategy Catalog Repo>/clusterBuildStrategy/"
+```
+
+Look especially at strategy variants: `multiarch-native-buildah` has previously turned
+out to implement a needed shell technique that the obvious strategy did not.
+
+If found, record `prior-art-found`, cite the file and line, and have the implementation
+plan reference it directly rather than reinventing it.
+
+### 3c. Destination-needs table (MANDATORY)
+
+One row per source-side field or behavior in scope:
+
+`source field | destination outcome (runnable/pushable/triggerable on the target cluster?) | disposition`
+
+Every disposition MUST be exactly one of:
+
+- `story:BUILD-XXXX` — existing or newly proposed
+- `N/A: <one-line justification>`
+
+Nothing else. `✅ merged, PR #15` is not a disposition; it is a status, and it belongs in
+Jira.
+
+**The table's absence is itself a blocking failure**, not only a blank row. A spec with
+no destination-needs table cannot reach `proceed`. Check it:
+
+```bash
+grep -q "^## Destination-needs" "<spec path>" || echo "BLOCKING: no destination-needs table"
+```
+
+A silent drop, a warn-and-drop, or a "converted but not runnable" outcome with no story
+is a blocking gap.
 
 _(Origin: Audit 1 §3 — six P1 silent drops with no story, because scope was walked
-per-source-field and never per-destination-outcome.)_
+per-source-field and never per-destination-outcome. This is the only rule in this skill
+that comes from a real incident. Treat it accordingly.)_
 
-### Phase 5: Has this already been done?
+## Phase 4: Design
 
-Answer one question — *is this feature already delivered, or in flight right now?* —
-from the tracked sources of truth, checked cheapest and most reliable first. Stop at the
-first hit. Do not crawl every branch: if work is real, it is recorded as a Jira story or
-an open PR. Trust that.
+Decide the approach, and record what you traded away.
 
-**5a. Jira — the master record**
+This phase exists because nothing in the prior skill produced the implementation plan;
+it appeared at write time from a template, which is why "suggested approach" was always
+singular and alternatives had nowhere to live.
 
-Jira is the single source of truth. Search it for a story that already covers this
-feature. If one does, report the existing story and stop.
+1. **Name the approaches.** For a `forked` story, at least two structurally distinct
+   ones. One should be the minimal viable version, one the ideal shape, weighted equally
+   so neither is a straw man.
+
+   **Use the escape clause rather than invent a second option.** If a hard constraint
+   already rules the alternative out, a safety rule, an API that does not exist, a
+   decision made upstream, then there was never a fork, and writing one up produces the
+   padding this section exists to prevent. Say so directly:
+   "this was the only viable shape because <the constraint>". An honest single option
+   beats a fabricated pair, and a reviewer can challenge the constraint far more easily
+   than they can challenge a straw man.
+2. **Choose**, and write each decision as a Y-statement with an id:
+
+   ```
+   ### D-2: image reference resolution
+
+   In the context of converting ImageStreamTag references, facing no cluster access at
+   conversion time, we decided for flag-driven mapping and against live API lookup, to
+   keep the plugin offline, accepting that an unmapped reference falls back to a
+   constructed registry path with a warning.
+   ```
+
+   You cannot complete that sentence without naming the rejected option and its cost.
+   Where the constraints genuinely forced the answer, the escape clause is:
+   "this was the only viable shape because ...".
+
+3. **Write the file reference table** — every file that changes, with a line number
+   where the change is localised.
+
+4. **Write acceptance criteria** — numbered, pass or fail, no subjective language.
+   "Orders older than 30 days return HTTP 410 for all four roles" passes. "The feature
+   works correctly" does not.
+
+## Phase 5: Draft the spec
+
+Write the spec to `<Designs Directory>/BUILD-XXXX-<slug>.md` using the template below.
+Do not write it to disk yet; present it at Phase 7.
+
+Mark every ambiguity inline, where it occurs:
+
+```
+The plugin maps `nodeSelector` directly to `spec.nodeSelector`
+[NEEDS CLARIFICATION: does Shipwright validate node labels at admission, or only at
+scheduling?] and drops unknown keys.
+```
+
+## Phase 6: Self-check before presenting
+
+Verify, and fix anything that fails:
+
+- [ ] Every section in the template is present
+- [ ] Every load-bearing claim carries an evidence grade
+- [ ] The destination-needs table exists and every row is dispositioned
+- [ ] Every `D-N` decision is a complete Y-statement, or uses the escape clause
+- [ ] Acceptance criteria are numbered and pass/fail
+- [ ] The file reference table has a `path:line` for every localised change
+- [ ] The terminal sentinel is the last non-whitespace line and matches the marker count
 
 ```bash
-jira issue list --jql "project = BUILD AND (summary ~ '<feature-keyword>' OR description ~ '<feature-keyword>')" --plain
+markers=$(grep -c "NEEDS CLARIFICATION" "<spec path>")
+tail -1 "<spec path>"   # must agree with $markers
 ```
 
-**5b. Merged code — is it already in `main`?**
-
-The conversion code lives in the Crane Plugin Repo, and this is where any PR goes.
-
-```bash
-CP="<Crane Plugin Repo>"
-grep -n -B3 -A10 "<feature-keyword>" "$CP/buildconfig/converter.go"
-grep -rn "<ISSUE-KEY>\|<feature-keyword>" "$CP/buildconfig/"
-```
-
-**5c. Open PRs — is it in flight?**
-
-```bash
-cd "<Crane Plugin Repo>"   # gh resolves the repo from its origin remote
-gh pr list --state open --search "<feature-keyword>"
-gh pr list --state open --search "<ISSUE-KEY>"
-```
-
-If all three come up empty, the feature is not started — triage it as new.
-
-### Phase 6: Feasibility & Necessity (Premise Challenge)
-
-Before recommending implementation, challenge the premise. Present these to the user:
-
-1. **Architecture check** — does Shipwright's architecture already handle this implicitly?
-   (e.g. ephemeral pods making `--no-cache` redundant, strategy-managed push making certain
-   auth flows unnecessary)
-2. **Parity vs need** — is this purely migration parity with BuildConfig, or do real users
-   independently need it in Shipwright?
-3. **Impact check** — what happens if we don't implement it? Can users work around it?
-   How many are affected?
-4. **Complexity check** — are there architectural reasons this is harder than it looks?
-   (e.g. Shipwright's volume model requiring strategy-level changes, API changes needing
-   upstream proposals)
-
-This is the interactive checkpoint. Do not proceed to triage until the user agrees with the
-feasibility assessment.
-
-### Phase 7: Look for Unknowns
-
-- Check the Jira description for links to Google Docs, GitHub issues, or other external
-  references not yet checked
-- Check for related Jira issues that should be grouped or sequenced
-- Check whether this issue is a prerequisite for, or blocked by, others in the epic
-- Ask: "Anything else I should check for this issue?"
-
-### Phase 8: Triage Summary
-
-Present a structured triage:
-
-```
-TRIAGE: BUILD-XXXX — <Title>
-===============================
-Category:     <classification>
-Priority:     High / Medium / Low
-  Reasoning:  <why this priority>
-Story Points: N (minimum 2)
-Blockers:     None / <list>
-Dependencies: <issue keys or none>
-Confidence:   N/10
-Risk:         <description or none>
-```
-
-Discuss with the user and adjust. Do NOT finalize until the user confirms.
-
-Confirm the issue exists in Jira under the expected epic BEFORE triaging. If the issue
-key does not resolve in Jira, STOP — there is nothing to triage against and nowhere to
-post the results. Surface it and wait.
-
-### Phase 9: Approval Gate — nothing is written before this
+## Phase 7: Approval Gate — nothing is written before this
 
 This skill produces two artifacts. **Both are gated on one explicit approval.**
-Do not write the design doc and do not post to Jira until the user has said yes to the
-preview below.
 
-Present both together:
+Present both:
 
-1. **Design doc** — the target path, and a summary of what it will contain.
-2. **Jira comment** — the exact text, verbatim, as it will be posted.
+1. **Spec** — the target path, and a summary of what it contains, including the
+   ceremony class, the Phase 3 outcome, and the unresolved-marker count.
+2. **Jira comment** — the exact text, verbatim.
 
-Then ask a single question: "Approve both?"
+Then ask: "Approve both?"
 
-On approval, execute in this order and report each result:
+On approval, execute in order and report each result:
 
-1. Write the design doc.
+1. Write the spec.
 2. Post the Jira comment.
-3. Set the Jira story points and confirm the epic link (see **Jira Update**).
+3. Set the Jira story points and confirm the epic link.
 
 If the user approves only some, do those and say plainly which were skipped.
 
-## Design Doc Output
+---
 
-Write to `<Designs Directory>/BUILD-XXXX-<slug>.md`, where the slug is the issue title in
-kebab-case (e.g. `BUILD-1578-no-cache-buildah-strategy.md`).
+# Spec Output
 
-### Template
+Write to `<Designs Directory>/BUILD-XXXX-<slug>.md`. The slug is the issue title in
+lowercase with hyphens.
 
 ```markdown
+---
+story: BUILD-XXXX
+topic_class: <buildah-flag|s2i-flag|api-change|field-mapping|plugin-policy|crane-conversion|crane-cli|documentation|spike>
+ceremony_class: <trivial|bounded|forked>
+ceremony_signal: <the numbered signal that decided the class, or "none — default">
+ceremony_upgraded_from: <omit unless the class ratcheted mid-run>
+necessity: <proceed|already-done|not-needed|superseded-by BUILD-XXXX>
+capability: <engine-gap|api-gap|exposure-gap|plugin-gap|prior-art-found|already-supported>
+evidence_grade: <A|B|C|D>
+---
+
 # BUILD-XXXX: <Title>
 
-## Summary
-- What the issue is asking for
-- Why it matters for migration
-- Category: <classification>
+## Context
+What the issue asks for, why it matters for the migration, who is affected.
 
-## Research Findings
+## Current State
+What exists today, verified, with `path:line` citations and an evidence grade per claim.
+Chain position: which link owns the gap.
 
-### Upstream Tool Support
-- <tool name> support: <yes/no/partial> (confidence: N/10)
-- Evidence: <links, docs, man page quotes>
-- Exact behavior: <what the flag/feature does>
+## Prior Art
+An existing implementation of this shape, cited by file and line, or "none found".
 
-### Upstream Shipwright Status
-- Current support: <none/partial/full> (confidence: N/10)
-- Files checked: <file:line references>
-- Existing proposals: <links or none>
+## Destination-needs
+| source field | destination outcome | disposition |
+|---|---|---|
+Every disposition is `story:BUILD-XXXX` or `N/A: <justification>`.
 
-### Strategy Catalog Status
-- Current support: <none/partial/full> (confidence: N/10)
-- Files checked: <file:line references>
-- Upstream differences: <list each>
-- Operator lag: <in sync / operator behind by: ...>
+## Decisions
+### D-1: <name>
+<Y-statement: in the context of X, facing Y, we decided for A and against B, to achieve
+C, accepting D.>
 
-### Crane Plugin Status
-- Current handling: <warning/partial/none> (confidence: N/10)
-- File: <file:line reference>
-- Prior story covering this feature: <BUILD-XXXX / none>  (not the issue being triaged)
-- Merged in main: <yes/no>
-- Open PR: <PR # / none>
-- Risk flags: <silent data loss warnings or none>
+## Proposed Change
+The approach, in enough detail that no design decisions remain.
 
-## Feasibility & Necessity
-- Architecture implicit handling: <yes/no, explanation>
-- Migration parity vs real user need: <assessment>
-- Practical impact if not implemented: <assessment>
-- Overall confidence: N/10
+## Files Reference
+| File | Change |
+|---|---|
+| `path/to/file.go:42` | What changes here |
 
-## Implementation Plan
+## Acceptance Criteria
+1. <numbered, pass/fail, no subjective language>
 
-### Repos to modify
-For each repo:
-- **<repo label>**: <specific file path(s)>
-  - Change: <what to do>
-  - Pattern: <reference to existing similar implementation>
+## Testing Plan
+| Layer | What | Count |
+|---|---|---|
+| Unit | | |
+| Cluster | | |
 
-Strategy changes go to the Strategy Catalog Repo. Conversion changes go to the Crane Plugin
-Repo. Never the operator, never crane-lib.
+## Out of Scope
+- <thing that looks related but is not part of this story>
 
-### Suggested approach
-1. <step 1 — which repo first and why>
-2. <step 2>
-3. <step N>
-
-## Triage
-
-| Field | Value |
-|-------|-------|
-| Priority | <High/Medium/Low> |
-| Story Points | <N> |
-| Blockers | <None or list> |
-| Dependencies | <Issue keys or none> |
-| Confidence | <N/10> |
-| Risk | <description or none> |
-
-## Open Questions
-- <questions needing team input>
+## Clarifications
+### Session YYYY-MM-DD
+- Q: <question> → A: <answer>
 
 ---
-_Generated by /tech-design on <date>_
+NO UNRESOLVED MARKERS
 ```
 
-## Jira Comment
+The last non-whitespace line is either `NO UNRESOLVED MARKERS` or
+`UNRESOLVED MARKERS: N`, and N must equal the count of `[NEEDS CLARIFICATION]` markers
+in the file. `/tech-implement` reads this line and refuses to start on a non-zero count.
 
-Drafted during Phase 9 and posted only after approval:
+# Jira Comment
 
-```
-**Tech Design Summary (<date>)**
+Post a summary: the necessity outcome, the capability outcome, the chosen approach with
+its `D-N` id, the unresolved-marker count, and a link to the spec path. Keep it short;
+the spec is the detail.
 
-<1-2 sentence summary of findings>
+# Jira Update
 
-**Implementation:**
-- <repo 1>: <what to change>
-- <repo 2>: <what to change>
+Set story points and confirm the epic link. Jira owns story state: priority, points,
+blockers, dependencies, status. The spec does not restate them.
 
-**Triage:** Priority: <X> | Story Points: <N> | Blockers: <Y>
+# Multi-Issue Session Flow
 
-Design doc: <design doc filename>   # filename only — never the absolute local path
+When given an epic, work through issues one at a time. After every three or four,
+surface any pattern across them: a shared blocker, a repeating change shape, a
+dependency chain, a story that should be re-prioritised because others depend on it.
 
-_Co-Authored-By: Claude Code._
-```
+Write these to `<Designs Directory>/epic-BUILD-XXXX-patterns.md` as you find them.
+Conversation does not survive compaction; a file does.
 
-Pass the approved text through stdin. Never interpolate it into the shell command — the
-comment can legitimately contain backticks, `$(...)`, or quotes, which would otherwise be
-executed rather than posted.
+# Deferred optimisations
 
-```bash
-printf '%s\n' "$APPROVED_COMMENT" | jira issue comment add <ISSUE-KEY> --template - --no-input
-```
+Do not act on these until there is data from the rewritten skill. Each names what to
+measure first.
 
-## Jira Update
+- **Scale spec sections by ceremony class.** Currently every class writes every section.
+  Measure: for `trivial` stories, how many sections are one line or empty. If most are,
+  a shorter form for that class is justified.
+- **Gate the prior-art sweep by class.** Currently it runs on every story. Measure: how
+  often the sweep returns `prior-art-found`, split by class. If `trivial` never hits,
+  gate it to `bounded` and `forked`.
+- **Retire the upstream half of Phase 3.** Measure: how often `engine-gap` or `api-gap`
+  is reached. Both were never reached in 25 prior runs. If a year passes with neither,
+  cut those two links from the chain walk.
+- **Revisit the five-question cap.** Measure: the distribution of questions actually
+  asked per run. If it clusters at one or two, lower the cap; if runs regularly hit five,
+  the cap is binding and the research is under-specified.
 
-Jira is the single source of truth. After the design doc is written and the Jira comment
-posted:
+# Compliance Report (MANDATORY — always emit)
 
-- Set the Jira story points via jira-cli (`customfield_10028` — never raw curl reads;
-  REST returns obfuscated data).
-- Confirm the issue's epic link matches the epic it was triaged under.
+| Phase | Status | Evidence |
+|---|---|---|
+| 0-7, one row each | ✅ / ⏭️ SKIPPED (reason) / ❌ | |
+| Destination-needs table present | ✅ / ❌ | grep output |
+| Terminal sentinel matches marker count | ✅ / ❌ | tail output |
 
-A mismatch between the design doc and the Jira points/epic is a BLOCKING error.
+An unexplained row, a missing destination-needs table, or a sentinel that disagrees with
+the marker count forces Completion Status to DONE_WITH_CONCERNS at best.
 
-## Multi-Issue Session Flow
+# Completion Status
 
-When triaging an epic or multiple issues:
-
-1. List all issues: `jira issue list --jql "project = BUILD AND 'Epic Link' = <EPIC-KEY>" --plain`
-2. Run Phase 0 setup (once)
-3. Present the issue list
-4. User picks the first issue, or suggest one based on status and dependencies
-5. Run the full research phases on it
-6. Produce the triage, discuss
-7. Phase 9 approval, then write
-8. Ask: "Ready for the next issue?"
-9. Repeat from step 4
-
-### Cross-Issue Intelligence
-
-As issues are triaged, accumulate context:
-- **Shared blockers** (e.g. "Shipwright API doesn't support X" blocks 3 issues)
-- **Repeating patterns** (e.g. "add param to buildah strategy" applies to 6 issues)
-- **Dependency chains** (e.g. an omitempty fix cleans up output for all conversions)
-- **Priority insights** (e.g. "this is a prerequisite for 4 other issues, bump priority")
-
-Surface these after every 3-4 issues: "Pattern emerging: these N issues all need the same
-type of change. Want to group them or adjust priorities?"
-
-### End-of-Session Summary
-
-```
-TRIAGE SUMMARY — <Epic Key(s)>
-═══════════════════════════════════════════
-| # | Issue | Title | Priority | Points | Blockers |
-|---|-------|-------|----------|--------|----------|
-| 1 | BUILD-XXXX | ... | High | 3 | None |
-| 2 | BUILD-YYYY | ... | Medium | 2 | BUILD-XXXX |
-═══════════════════════════════════════════
-Total: N issues | H high, M medium, L low | P total points
-```
-
-## Smart-Skip Rule
-
-If the issue description already answers a phase's questions (e.g. a well-written spike with
-clear scope, or an issue that explicitly references the upstream tool docs), skip that phase.
-Note what was skipped and why. Phase 9 is never skipped.
-
-## Escape Hatch
-
-If the user says "good enough", "move on", or "skip the rest":
-- Compress remaining phases into a single summary
-- Lower confidence scores by 2 points for unverified claims
-- Mark the design doc with `NEEDS_CONTEXT` status
-- Proceed to triage, then Phase 9
-
-The Escape Hatch does not waive Phase 9 or the Compliance Report.
-
-## Compliance Report (MANDATORY — always emit, even on early exit or Escape Hatch)
-
-| Phase | Status | Evidence / Reason |
-|-------|--------|-------------------|
-| 0–9 (one row each, incl. Phase 4d destination-needs table row count) | ✅ / ⏭️ SKIPPED (reason) / ❌ | |
-| Jira write-back verified (points + epic link) | ✅ / ❌ | command output |
-
-Any unexplained row forces Completion Status = DONE_WITH_CONCERNS at best.
-
-## Completion Status
-
-End each issue with one of:
-- **DONE** — full research complete, design doc written, Jira updated
-- **DONE_WITH_CONCERNS** — research complete but gaps identified (list them)
-- **BLOCKED** — cannot proceed, state what's missing
-- **NEEDS_CONTEXT** — need user or team input on specific questions
+- **DONE** — research complete, spec written, Jira updated, sentinel reads
+  `NO UNRESOLVED MARKERS`
+- **DONE_WITH_CONCERNS** — complete but with unresolved markers, listed
+- **BLOCKED** — cannot proceed; state the blocker and what was tried
+- **NEEDS_CONTEXT** — missing information; state exactly what is needed
