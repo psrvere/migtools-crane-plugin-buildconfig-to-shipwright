@@ -926,6 +926,152 @@ func TestConvertImageSource(t *testing.T) {
 	}
 }
 
+// TestConvertImageSourceUnsupportedFields covers the degraded path: an image
+// source that also sets `as` and `paths`. Shipwright's OCIArtifact source has no
+// equivalent for either, so the converter warns for each and still produces the
+// Build with an OCIArtifact source (converted-with-warnings, not failed).
+func TestConvertImageSourceUnsupportedFields(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata": map[string]interface{}{
+				"name":      "image-app",
+				"namespace": "myns",
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Image",
+					"images": []interface{}{
+						map[string]interface{}{
+							"from": map[string]interface{}{
+								"kind": "DockerImage",
+								"name": "registry.example.com/source:latest",
+							},
+							"as": []interface{}{"stage"},
+							"paths": []interface{}{
+								map[string]interface{}{
+									"sourcePath":     "/src/artifacts",
+									"destinationDir": "artifacts",
+								},
+							},
+						},
+					},
+				},
+				"strategy": map[string]interface{}{
+					"type":           "Docker",
+					"dockerStrategy": map[string]interface{}{},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{
+						"kind": "DockerImage",
+						"name": "quay.io/example/myapp:latest",
+					},
+				},
+			},
+		}},
+	}
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sawAs, sawPaths bool
+	for _, entry := range hook.AllEntries() {
+		if entry.Level != logrus.WarnLevel {
+			continue
+		}
+		if strings.Contains(entry.Message, "Image source 'As' field is not supported") {
+			sawAs = true
+		}
+		if strings.Contains(entry.Message, "Image source 'Paths' field is not supported") {
+			sawPaths = true
+		}
+	}
+	if !sawAs {
+		t.Error("expected a warning for the unsupported image source 'As' field")
+	}
+	if !sawPaths {
+		t.Error("expected a warning for the unsupported image source 'Paths' field")
+	}
+
+	// The unsupported sub-fields are dropped, not fatal: the Build is still
+	// produced with the image mapped to an OCIArtifact source.
+	if len(resp.NewResources) != 1 {
+		t.Fatalf("expected 1 converted resource, got %d", len(resp.NewResources))
+	}
+	b := &shipwrightv1beta1.Build{}
+	jsonBytes, _ := json.Marshal(resp.NewResources[0].Object)
+	json.Unmarshal(jsonBytes, b)
+	if b.Spec.Source == nil || b.Spec.Source.Type != shipwrightv1beta1.OCIArtifactType {
+		t.Fatalf("expected OCIArtifact source type, got %+v", b.Spec.Source)
+	}
+	if b.Spec.Source.OCIArtifact == nil || b.Spec.Source.OCIArtifact.Image != "registry.example.com/source:latest" {
+		t.Errorf("unexpected OCIArtifact image: %+v", b.Spec.Source.OCIArtifact)
+	}
+}
+
+// TestConvertMultipleImageSources covers the fatal path: Shipwright allows a
+// single source, so a BuildConfig with more than one image source cannot be
+// represented. The conversion fails and the BuildConfig is passed through
+// unchanged — no whiteout, no generated Build.
+func TestConvertMultipleImageSources(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	request := transform.PluginRequest{
+		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "build.openshift.io/v1",
+			"kind":       "BuildConfig",
+			"metadata": map[string]interface{}{
+				"name":      "multi-image-app",
+				"namespace": "myns",
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "Image",
+					"images": []interface{}{
+						map[string]interface{}{
+							"from": map[string]interface{}{
+								"kind": "DockerImage",
+								"name": "registry.example.com/first:latest",
+							},
+						},
+						map[string]interface{}{
+							"from": map[string]interface{}{
+								"kind": "DockerImage",
+								"name": "registry.example.com/second:latest",
+							},
+						},
+					},
+				},
+				"strategy": map[string]interface{}{
+					"type":           "Docker",
+					"dockerStrategy": map[string]interface{}{},
+				},
+				"output": map[string]interface{}{
+					"to": map[string]interface{}{
+						"kind": "DockerImage",
+						"name": "quay.io/example/myapp:latest",
+					},
+				},
+			},
+		}},
+	}
+
+	resp, err := plugin.Run(request)
+	if err != nil {
+		t.Fatalf("expected no error (failed conversion is passed through), got: %v", err)
+	}
+	if resp.IsWhiteOut {
+		t.Error("expected IsWhiteOut to be false for a failed conversion")
+	}
+	if len(resp.NewResources) > 0 {
+		t.Errorf("expected no new resources for a failed conversion, got %d", len(resp.NewResources))
+	}
+}
+
 func TestConvertOutputImageStreamTag(t *testing.T) {
 	tests := []struct {
 		name      string
