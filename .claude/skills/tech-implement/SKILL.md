@@ -28,7 +28,19 @@ without a design doc is how unresearched assumptions reach a PR.
   the Strategy Catalog Repo.
 - **Never edit the Crane Lib Repo.** It is frozen prior art, not a PR target.
 - **One branch = one story.** Never add a commit for a different BUILD key to this branch.
-- **No status claim without a results file.** See the Phase 7 status gate.
+- **No status claim without a results file.** See the Phase 7 Definition-of-Done gate.
+- **This skill never writes to Jira.** It may *read* Jira for context (optional). It never
+  posts comments, attaches files, transitions issues, or writes story points. Recording the
+  outcome in Jira is a separate step the user owns.
+
+## Voice — run /unslop on every user-facing message
+
+Before showing the user any summary, question, report, or completion banner, pass the text
+through the `/unslop` skill so it reads like a person wrote it. This covers the Phase 0
+"Ready to proceed?" summary, every `AskUserQuestion` prompt and option, and the final
+Compliance Report / Completion Status. Commit messages are already unslopped per `AGENTS.md`;
+this extends the same bar to everything the user reads. (The PR body is `/create-pr`'s, and
+it unslops that itself.)
 
 ## Repo & Tool Map
 
@@ -138,14 +150,16 @@ its own document is a worse signal than no sentinel, because it looks checked.
    A doc with no sentinel predates the sentinel and is reported, not blocked, so
    in-flight work triaged under the previous template keeps running.
 
-3. Read the current Jira state: `jira issue view BUILD-XXXX --plain --comments 5`.
+3. *(Optional)* Read the current Jira state for context: `jira issue view BUILD-XXXX --plain
+   --comments 5`. This is read-only and can be skipped if Jira is unavailable — the design
+   doc and git carry what implementation needs. This skill never writes to Jira (Iron Law).
 
 4. Extract from the design doc frontmatter: **topic_class**, **ceremony_class**,
    **necessity**, **capability**. From the body: the **Files Reference** table and the
    **Proposed Change**.
 
-   Read priority, story points, blockers and dependencies from **Jira**, not from the
-   design doc. Jira owns story state; the design doc owns the design.
+   If you read Jira in step 3, treat its priority, blockers and dependencies as extra
+   context only. Do not reconcile or write anything back.
 
 5. Check for existing work before creating anything. Remote-only branches count — a fresh
    clone has no local branches at all:
@@ -183,22 +197,8 @@ git -C "$CP" for-each-ref --format='%(refname:short)' refs/heads refs/remotes/or
    WIP branches may carry wrong assumptions. Verify param names match the actual strategy
    parameter, the approach matches the design doc, and tests assert the real param names.
 
-Present a summary: "Implementing BUILD-XXXX. Design doc says: [summary]. Existing branches:
-[none / list]. Ready to proceed?" Wait for the answer.
-
-## Story Point & Estimation Scale
-
-Used when setting Jira story points. Jira is the only source for points; the design doc
-does not carry them, so there is nothing to reconcile.
-
-| Points | Complexity | Est. Days | When to use |
-|--------|-----------|-----------|-------------|
-| 2 | Small, well-bounded | 2 days | Single repo change, clear pattern exists |
-| 3 | Moderate | 3 days | Multi-repo change, conversion logic + tests |
-| 4 | Large | 5 days | Cross-cutting, API changes, upstream proposals |
-
-Minimum is 2. If something looks like 5+, flag it and propose a split.
-**Est. Days = Points**, except 4 points = 5 days.
+Present a summary (run it through `/unslop` first): "Implementing BUILD-XXXX. Design doc
+says: [summary]. Existing branches: [none / list]. Ready to proceed?" Wait for the answer.
 
 ## Branch Naming
 
@@ -287,10 +287,32 @@ Hard-won from previous implementations. Apply them.
    plus the `OpenShiftBuild` CR that enables Shipwright, and **ask before applying them**.
    Do not install onto a cluster unprompted.
 
+### Unit testing gotchas
+
+Hard-won from previous implementations, same as the cluster list above.
+
+1. **The BuildRun template annotation only emits when the BuildConfig sets `spec.resources`.**
+   `processResources` early-returns when there are no requests or limits, so no
+   `BuildRunTemplateAnnotation` is written. A test asserting on the template — for example
+   its `spec.serviceAccount` — must give the test BuildConfig a `resources` block, or the
+   annotation will not exist and the assertion fails on absence rather than value.
+
+2. **Workspace vs `GOWORK=off` skew is expected local noise.** Editor/LSP compile errors
+   about missing methods (e.g. `Apply` on a mock, `runtime.ApplyConfiguration`) come from
+   the workspace resolving a newer dependency than CI. Validate with `GOWORK=off go test`
+   before trusting or "fixing" them; never edit committed files to satisfy workspace-only
+   errors. See the workspace-parity section in the project `CLAUDE.md`.
+
 ## Phase 3: Implement
 
 Order matters — a conversion that references a strategy parameter cannot be tested until
 that parameter exists.
+
+**Before deleting or renaming any symbol** (function, struct field, constant, or a warning
+string that tests assert on), `git grep` every affected identifier across both `*.go` and
+`*_test.go` and reconcile every hit. The design doc's Files Reference is a starting point,
+not a guarantee — a test file it never lists can still exercise the code you are removing,
+and it will only surface as a suite failure later.
 
 1. **Strategy Catalog Repo first**, if the issue changes a ClusterBuildStrategy.
 2. **Crane Plugin Repo second** — the conversion logic in `buildconfig/`.
@@ -305,6 +327,10 @@ Run `compound-engineering:ce-code-review` over the change. If `/tech-review` is 
 this machine, run it too for the cross-repo checks. Neither ships with this repo, so note it
 as SKIPPED in the Compliance Report rather than failing when absent.
 
+If a reviewer sub-agent dies with a model-availability error (e.g. the session's Opus model
+is not enabled for sub-agents on this deployment), re-dispatch that reviewer with an explicit
+`model:` override such as `sonnet`. A missing reviewer is a coverage gap, not a pass.
+
 ## Phase 5: Test
 
 If `/tech-test` is available, invoke it with `BUILD-XXXX` — it runs the classification-driven
@@ -315,7 +341,12 @@ substitution.
 Record results to `<Designs Directory>/test-results/BUILD-XXXX-results.md` with the exact
 commands, pasted raw output, exit codes, and the branch HEAD SHA they ran against.
 
-## Phase 6: Commit & Push to the Fork
+## Phase 6: Commit (no push)
+
+This skill **commits, but never pushes**. The commit is what lets `/tech-review` and
+`/tech-test` see the work — both build a disposable worktree from the branch ref, which
+sees committed history only, not staged or unstaged changes. Pushing to the fork and
+opening the PR belong to `/create-pr`, which runs later.
 
 1. Confirm the worktree is on the story branch — never re-create it here:
 
@@ -323,22 +354,10 @@ commands, pasted raw output, exit codes, and the branch HEAD SHA they ran agains
 git -C "$WT" branch --show-current        # must equal BUILD-XXXX-<slug>
 ```
 
-2. Rebase onto fetched `origin/main`, inside the worktree, then re-run the tests:
-
-```bash
-git -C "$WT" fetch origin --quiet
-git -C "$WT" rebase origin/main
-```
-
-   For a stacked branch, restack on the parent's **current** tip — a stale stack silently
-   drops the parent's later fixes.
-
-   If the rebase reports conflicts, **stop**. Do not commit or push a worktree that holds
-   conflict markers. Either resolve them and `git -C "$WT" rebase --continue`, or
-   `git -C "$WT" rebase --abort` and surface the conflict to the user for a decision.
-
-3. Commit only your own paths. A shared index can hold another session's staged files, and a
-   bare `git add .` would sweep them into your commit:
+2. Commit only your own paths **first** — you cannot rebase a worktree that still holds
+   uncommitted changes (`git rebase` aborts with "cannot rebase: You have unstaged
+   changes"). A shared index can hold another session's staged files, and a bare
+   `git add .` would sweep them into your commit:
 
 ```bash
 git -C "$WT" commit --only -s -S -m "[BUILD-XXXX] <type>: <subject>" -- buildconfig/converter.go buildconfig/converter_test.go
@@ -348,9 +367,32 @@ git -C "$WT" commit --only -s -S -m "[BUILD-XXXX] <type>: <subject>" -- buildcon
    shell variable arrives as a single argument and fails.
 
    Convention: `[BUILD-XXXX] <type>: <subject>`, where type is `feat`, `fix`, `test`,
-   `docs`, or `chore`. `-s` adds the sign-off, `-S` GPG-signs. Add `Co-Authored-By: Claude`
-   with no email address. Before every commit, confirm the message's issue key equals the
-   branch's issue key.
+   `docs`, or `chore`. `-s` adds the DCO sign-off (required by `AGENTS.md`). `-S` GPG-signs;
+   if this machine has no signing key configured, drop `-S` and keep `-s`. End the message
+   body with the trailer `Co-Authored-By: Claude` — **no email address** (a bare marker; it
+   is deliberately not GitHub's attributed-co-author form). Write the message through
+   `/unslop`. Before every commit, confirm the message's issue key equals the branch's issue
+   key.
+
+   This is the final commit message. `/create-pr` preserves it rather than rewriting it, so
+   spend the effort here. Later review passes may amend this commit with fixes (that is
+   `/tech-review`'s concern, out of scope here).
+
+3. Rebase onto fetched `origin/main`, inside the worktree, then re-run the tests and record
+   the fresh HEAD SHA into the results file (Phase 5) so the Definition-of-Done SHA gate
+   matches the post-rebase tip:
+
+```bash
+git -C "$WT" fetch origin --quiet
+git -C "$WT" rebase origin/main
+```
+
+   For a stacked branch, restack on the parent's **current** tip — a stale stack silently
+   drops the parent's later fixes.
+
+   If the rebase reports conflicts, **stop**. Do not leave a worktree that holds conflict
+   markers. Either resolve them and `git -C "$WT" rebase --continue`, or
+   `git -C "$WT" rebase --abort` and surface the conflict to the user for a decision.
 
 4. Verify what actually landed, on which branch:
 
@@ -359,32 +401,20 @@ git -C "$WT" show --name-only --format='' HEAD
 git -C "$WT" branch --show-current
 ```
 
-5. Push to the **fork**, by explicit refspec, so no checkout is needed:
+   Do **not** push. The branch stays local until `/create-pr` pushes it to the fork. That
+   keeps the work in one place rather than pushing here and force-pushing again after review.
 
-```bash
-git -C "$WT" push <fork-remote> "BUILD-XXXX-<slug>:BUILD-XXXX-<slug>"
-```
+## Phase 7: Record the Outcome
 
-   Never push to `origin`. Never plain force-push: use `--force-with-lease`, and first
-   preserve the fork's existing tip as a tag and **push the tag before the branch**, so the
-   old tip is recoverable by anyone, not just locally:
+This skill does **not** write to Jira (Iron Law). Its job here is to gate what you may claim
+and to present an honest summary. Recording the outcome in Jira — comments, attachments,
+status, story points — is a separate step the user runs themselves after this skill returns.
 
-```bash
-git -C "$WT" tag "archive/<fork-remote>-old-BUILD-XXXX-<slug>" <fork-remote>/BUILD-XXXX-<slug>
-git -C "$WT" push <fork-remote> "archive/<fork-remote>-old-BUILD-XXXX-<slug>"
-git -C "$WT" push --force-with-lease <fork-remote> "BUILD-XXXX-<slug>:BUILD-XXXX-<slug>"
-```
+### Definition-of-Done gate — no exceptions
 
-## Phase 7: Update Jira
+Whether you may claim the work is *tested* is gated on evidence, independent of any tracker:
 
-Jira is the single source of truth. Record the change there directly.
-
-### Evidence gate — no exceptions
-
-Whether you may claim the work is tested is gated on evidence:
-
-- Claim it tested (in the comment, and when transitioning the issue toward a review/done
-  state) only if `<Designs Directory>/test-results/BUILD-XXXX-results.md` exists and
+- Claim it tested only if `<Designs Directory>/test-results/BUILD-XXXX-results.md` exists and
   contains (a) the exact test commands, (b) pasted raw output, (c) exit code 0, (d) the
   branch HEAD SHA tested, and — for cluster-observable behaviour — (e) cluster evidence
   such as `oc` output or BuildRun status.
@@ -398,76 +428,52 @@ current="$(git -C "$WT" rev-parse HEAD)"
 ```
 
 - If any element above is missing, or the SHAs differ, say "implemented, evidence pending"
-  in the comment and leave the issue in progress rather than moving it to review/done.
+  in the summary and set the Completion Status to **DONE_WITH_CONCERNS**, not **DONE**.
 - Never claim tested on the strength of a narrative.
 
-### Jira write
-
-Every action below mutates Jira. Show the user the exact list — comment text, attachment,
-status transition, and story points — and get one explicit approval before running any of
-them. Skip any the user declines.
-
-- Post a comment summarising the change and the test results, including the branch
-  (`<fork-remote>:BUILD-XXXX-<slug> (<repo-name>)`, one line per repo when the change spans
-  several). Pass the approved text through stdin — never interpolate it into the shell
-  command, where backticks or `$(...)` in the text would be executed instead of posted:
-
-```bash
-printf '%s\n' "$APPROVED_COMMENT" | jira issue comment add BUILD-XXXX --template - --no-input
-```
-
-- Attach the updated design doc. Reference it by **filename** in any comment; an absolute
-  local path discloses the author's home directory and is useless to everyone else.
-- Transition the issue to match the evidence gate above.
-- Write and verify story points via jira-cli (`customfield_10028`). Raw REST reads return
-  obfuscated data.
-- Read back with `jira issue view BUILD-XXXX` and confirm status and points before printing
-  the banner.
-
 ### Summary banner
+
+Run the banner through `/unslop` before printing it.
 
 ```
 IMPLEMENTATION COMPLETE: BUILD-XXXX
 ====================================
 Repos modified:
-  - <repo>: <fork-remote>:BUILD-XXXX-<slug> (pushed to fork)
+  - <repo>: BUILD-XXXX-<slug> (committed locally, not pushed)
 
 Tests:
   - Unit:    X/Y passed — results: test-results/BUILD-XXXX-results.md @ <HEAD SHA>
   - Cluster: <PASS/FAIL/N-A> — evidence: <section of the results file>
 
-Jira:    comment added, attachment replaced, status <state>, points set and read back
-PR:      <not created yet / link>
+Jira:    not touched by this skill — /create-pr updates it
+PR:      not created yet — run /create-pr
 ```
 
 A banner claim without a matching results file is prohibited. Any test name cited must exist
 in the branch diff or on main — verify with
 `git -C "$WT" diff --no-ext-diff origin/main...HEAD -- '*_test.go'`.
 
-## Phase 8: Create the PR
+### Handoff for the downstream skills
 
-On user request, once the branch is pushed to the fork.
+Leave everything the next steps need ready to hand off: the results file path, the branch
+(`BUILD-XXXX-<slug> (<repo-name>)`, one line per repo), the tested state from the gate
+above, and — when a cluster case is still pending — which acceptance criteria remain
+unverified. Do not run any `jira` write command; `/create-pr` owns the Jira update.
 
-```bash
-FORK_OWNER="$(git -C "$WT" remote get-url <fork-remote> \
-  | sed -E 's#^(git@[^:]+:|https://[^/]+/)([^/]+)/.*#\2#')"
+## Phase 8: Hand off to review
 
-gh pr create --repo <upstream-org>/<repo-name> \
-  --head "$FORK_OWNER:BUILD-XXXX-<slug>" \
-  --base main \
-  --title "[BUILD-XXXX] <title>" \
-  --body-file <path to a file holding the approved body>
-```
+This skill neither pushes nor opens a PR. Once the commit and the Definition-of-Done gate
+are in place, **ask the user whether to run `/tech-review BUILD-XXXX`** before going further.
+Do not run it automatically.
 
-Use `--body-file`, not an inline heredoc, so backticks and `$(...)` in the body are not
-executed by the shell.
+The rest of the chain is separate, user-invoked steps:
 
-The body states what the change does and why, in terms a reviewer with no prior context can
-follow. It covers the change, the testing evidence, and a Jira link. Do not narrate the
-project's internal history.
+- `/tech-review BUILD-XXXX` — the pre-PR review gate (may amend the commit with fixes).
+- `/tech-test BUILD-XXXX` — the classification-driven unit and cluster tests.
+- `/create-pr BUILD-XXXX` — pushes the branch to the fork, opens the PR, and updates Jira.
 
-Then, with one explicit user approval covering all of it, transition the issue to reflect
-that the PR is open and add the PR link as a Jira remote link and comment.
+`/create-pr` is what pushes and touches the tracker, so this skill's job ends at a
+committed, tested, review-ready branch plus the offer to run `/tech-review`.
 
 ## Compliance Report (MANDATORY — always emit, even on early exit)
 
@@ -479,15 +485,16 @@ that the PR is open and add the PR link as a Jira remote link and comment.
 | 3 implement + unit tests | ✅ / ❌ | results file path |
 | 4 review | ✅ / ⏭️ SKIPPED (reason) | |
 | 5 /tech-test | ✅ / ⏭️ SKIPPED (reason) | |
-| 6 rebase + push to fork | ✅ / ❌ | ahead/behind vs origin/main; `show --name-only` output |
-| 7 Jira evidence gate + write-back | ✅ / ❌ | read-back output |
+| 6 commit + rebase (no push) | ✅ / ❌ | ahead/behind vs origin/main; `show --name-only` output |
+| 7 Definition-of-Done gate | ✅ / ❌ | results-file SHA vs current tip |
+| 8 handoff (offer /tech-review) | ✅ / ❌ | asked the user |
 
 The banner may not be printed while any row is ❌ or unexplained.
 
 ## Completion Status
 
 End with one of:
-- **DONE** — implemented, tested with evidence, pushed, Jira updated
-- **DONE_WITH_CONCERNS** — complete but with gaps; list them
+- **DONE** — implemented, tested with evidence, committed locally, review-ready (push, PR, and Jira are `/create-pr`'s)
+- **DONE_WITH_CONCERNS** — complete but with gaps; list them (e.g. cluster evidence pending)
 - **BLOCKED** — cannot proceed; state what is missing
 - **NEEDS_CONTEXT** — needs user or team input on specific questions

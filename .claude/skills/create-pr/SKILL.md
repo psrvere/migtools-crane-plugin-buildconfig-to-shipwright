@@ -21,12 +21,12 @@ story.
   the branch is named for it.
 - **Jira prefix:** if a Jira issue is linked, commit subjects and the PR title
   start with `[BUILD-XXXX]`. The Jira project code is `BUILD`.
-- **Commit flags:** always `-s` (sign-off) and `-S` (GPG sign).
-- **Co-author trailer:** every commit **message** ends with
-  `Co-Authored-By: Claude <noreply@anthropic.com>` — the email is required there,
-  or GitHub will not render the co-author. The PR body ends with
-  `Co-Authored-By: Claude` (no email); GitHub does not parse the PR description
-  for co-authors, so it is just a marker.
+- **Commit flags:** always `-s` (sign-off), and `-S` (GPG sign) when a signing key
+  is configured — drop `-S` if this machine has none.
+- **Co-author trailer:** every commit **message** and the PR body end with
+  `Co-Authored-By: Claude` — **no email address**, everywhere. This is a bare
+  marker, not GitHub's attributed-co-author form (which would need an email); the
+  project chose the plain line for consistency across all skills.
 - **Voice:** run the `unslop` skill over the commit body, PR title, and PR body
   before using them (strip AI tells, plain human voice).
 
@@ -88,29 +88,60 @@ If the user passed a Jira key, use it. Otherwise ask via AskUserQuestion with
 
 Capturing a key here means Step 9 runs. No key means Step 9 is skipped.
 
-## Step 3 — Detect mode
+## Step 3 — Locate the work: branch, worktree, and mode
 
-```bash
-BRANCH=$(git branch --show-current)
-```
+The change may not live in the current checkout. `/tech-implement` commits on the story
+branch inside a **dedicated worktree** while the main checkout stays on `main`, so
+`git branch --show-current` here can read `main` and miss the work entirely. Resolve the
+branch first, then run every later git command against the directory that actually holds it.
 
-- **On `main`** → new-PR mode. Go to Step 4 to create a branch.
-- **On a feature branch** → check for an open PR:
+1. **Resolve the branch.**
+   - With a `BUILD-XXXX` key, find its branch across local refs:
 
-  ```bash
-  gh pr list --head "$BRANCH" --state open --json number,title,url
-  ```
+     ```bash
+     git for-each-ref --format='%(refname:short)' refs/heads \
+       | grep -E "BUILD-XXXX" | grep -vE '(^|/)main$' | sort -u
+     ```
 
-  - **Open PR found** → amend mode (default). Show it and confirm via
-    AskUserQuestion. The user may override to add a separate commit instead.
-  - **No open PR** → new-PR mode on the existing branch. Skip Step 4.
+     Exactly one match → use it. Several → list and ask. None → fall back to the current
+     branch, or Step 4 (create a branch) if the checkout is on `main`.
+   - No key → use the current branch (`git branch --show-current`).
 
-**Amend-mode principle:** the PR is always one commit. Rewrite the commit
-message, PR title, and PR body to describe the entire diff from `main` as one
-coherent unit of work. Never reference "added later", "fixed after review", or
-incremental steps. If the branch has more than one commit, squash them (Step 6c
-does this with `git reset --soft main`) so the single message matches the
-history.
+2. **Find that branch's working directory.** If it is checked out in a worktree, operate
+   there; otherwise operate in the current checkout. Every git command in Steps 5–8 runs
+   with `git -C "$WORK"` (or `cd "$WORK"` once). Never `git checkout` the branch in the main
+   checkout — another session may share it.
+
+   ```bash
+   WORK=$(git worktree list --porcelain \
+     | awk -v b="refs/heads/$BRANCH" '/^worktree /{w=$2} $0=="branch "b{print w}')
+   WORK=${WORK:-$(pwd)}
+   ```
+
+3. **Detect mode.** Derive the fork owner (Step 8) and check for an open PR:
+
+   ```bash
+   gh pr list --head "<fork-owner>:$BRANCH" --state open --json number,title,url
+   ```
+
+   - **Open PR found** → amend mode. Show it and confirm via AskUserQuestion.
+   - **No open PR, but the branch already has a commit ahead of `main`** → new-PR mode on
+     the **existing commit**. `/tech-implement` wrote and unslopped that commit; do not
+     re-commit or rewrite its message. Skip Step 4 and Steps 5–6; go to Step 7 (push).
+   - **No open PR and no commit ahead** (on `main`, or an empty branch) → new-PR mode: create
+     the branch (Step 4), stage (Step 5), and commit (Step 6).
+
+   Check for an existing commit with:
+
+   ```bash
+   git -C "$WORK" rev-list --count "main..$BRANCH"    # >0 means a commit already exists
+   ```
+
+**Amend-mode principle:** the PR is always one commit. When you *do* author the message,
+describe the entire diff from `main` as one coherent unit — never "added later" or "fixed
+after review". If the branch has several commits **and none is an already-finished
+`/tech-implement` commit you are preserving**, squash them (Step 6c, `git reset --soft
+main`) so one message matches the history. A single finished commit is left as-is.
 
 ## Step 4 — Create branch (new-PR mode, only when on `main`)
 
@@ -140,6 +171,11 @@ git add <file1> <file2> ...
 
 ## Step 6 — Commit
 
+**Skip this whole step if the branch already carries a finished `/tech-implement` commit**
+(Step 3 found a commit ahead of `main` and no new unstaged work). That commit is already
+signed, unslopped, and carries the canonical trailer — preserve it and go to Step 7. Run
+Step 6 only when you are authoring the first commit or squashing several unfinished ones.
+
 ### 6a. Analyze the diff
 
 - Amend mode: `git diff main...HEAD`
@@ -162,7 +198,7 @@ Final shape:
 
 <unslopped body>
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Claude
 ```
 
 ### 6c. Commit
@@ -175,7 +211,7 @@ git commit -s -S -m "$(cat <<'EOF'
 
 <body>
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Claude
 EOF
 )"
 ```
@@ -192,32 +228,36 @@ git commit -s -S -m "$(cat <<'EOF'
 
 <body covering ALL changes in the PR>
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Claude
 EOF
 )"
 ```
 
 ## Step 7 — Push (to `fork`, never `origin`)
 
-**New-PR mode:**
+Run these in the branch's working directory (`git -C "$WORK"`), by explicit refspec, so no
+checkout switch is needed. This is the **first** push for a `/tech-implement` branch —
+`/tech-implement` commits but never pushes.
+
+**New-PR mode (branch not yet on `fork`):**
 
 ```bash
-git push -u fork <branch>
+git -C "$WORK" push -u fork "$BRANCH:$BRANCH"
 ```
 
-If this branch already exists on `fork` and has diverged (e.g. a previously
-closed PR left a stale tip), the plain push is rejected. Show the user the
-rejection, and only after they confirm, re-run with `--force-with-lease`:
+If the branch already exists on `fork` and has diverged (a previous push, or a closed PR
+left a stale tip), the plain push is rejected. Preserve the fork's current tip as an
+`archive/*` tag and **push the tag before the branch**, then force-with-lease — never a
+plain force-push:
 
 ```bash
-git push -u --force-with-lease fork <branch>
+git -C "$WORK" tag "archive/fork-old-$BRANCH" "fork/$BRANCH"
+git -C "$WORK" push fork "archive/fork-old-$BRANCH"
+git -C "$WORK" push -u --force-with-lease fork "$BRANCH:$BRANCH"
 ```
 
-**Amend mode:**
-
-```bash
-git push --force-with-lease fork <branch>
-```
+**Amend mode** (the branch is on `fork`, you rewrote or the review amended the commit):
+same archive-then-force-with-lease sequence as above.
 
 ## Step 8 — Create or update the PR
 
@@ -275,7 +315,7 @@ EOF
 to create it, and stop if nothing comes back rather than editing PR "".
 
 ```bash
-PR_NUMBER=$(gh pr list --head "$FORK_OWNER:$(git branch --show-current)" --state open --json number --jq '.[0].number')
+PR_NUMBER=$(gh pr list --head "$FORK_OWNER:$BRANCH" --state open --json number --jq '.[0].number')
 [ -n "$PR_NUMBER" ] || { echo "no open PR found for this branch"; exit 1; }
 gh pr edit "$PR_NUMBER" --title "..." --body "$(cat <<'EOF'
 ...
@@ -323,15 +363,27 @@ report the PR as-is. Run each action the user confirmed:
    jira issue assign BUILD-XXXX "$(jira me)"
    ```
 
-4. **Add to current sprint:**
+4. **Add to current sprint.** Resolve the active sprint from the **board's agile API**, not
+   `jira sprint list --current` — that command lists the current sprint's *issue keys*
+   (e.g. `BUILD-2401`), so `tr -dc '0-9'` yields an issue number, usually a *completed*
+   sprint, and the add fails with `You must specify a sprint which has not been completed`.
+   Find the board that owns the project, then its active sprint:
 
    ```bash
-   SPRINT_ID=$(jira sprint list --current --plain --no-headers --columns id | head -n 1 | tr -dc '0-9')
-   [ -n "$SPRINT_ID" ] || { echo "could not resolve the active sprint ID"; exit 1; }
+   # Board that holds this project's sprints (pick the scrum board for the team, e.g.
+   # "Openshift Builds Sprint Board"); list boards with `jira board list`.
+   BOARD_ID=<scrum-board-id>
+   SPRINT_ID=$(curl -s --netrc \
+     "https://redhat.atlassian.net/rest/agile/1.0/board/$BOARD_ID/sprint?state=active" \
+     | jq -r '.values[0].id')
+   [ -n "$SPRINT_ID" ] && [ "$SPRINT_ID" != "null" ] || { echo "could not resolve the active sprint ID"; exit 1; }
    curl -s -X POST "https://redhat.atlassian.net/rest/agile/1.0/sprint/$SPRINT_ID/issue" \
      -H "Content-Type: application/json" --netrc \
-     -d '{"issues": ["BUILD-XXXX"]}'
+     -d '{"issues": ["BUILD-XXXX"]}' -o /dev/null -w "sprint add: %{http_code}\n"   # 204 = added
    ```
+
+   Verify the issue's sprint field afterward (`customfield_10020`) rather than trusting the
+   status code alone.
 
 5. **Move to Review:**
 
