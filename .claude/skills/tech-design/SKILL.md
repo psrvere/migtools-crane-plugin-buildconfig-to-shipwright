@@ -125,6 +125,12 @@ Do not batch. Do not ask a question whose answer is in a repo you can read. Ask 
 highest-impact question first, and re-evaluate after each answer, since an answer often
 dissolves the questions behind it.
 
+Lead with the answer. The first line of any question or checkpoint is the
+recommendation, or the fact the human asked for, in one sentence; context and options
+follow for a reader who wants them. A three-option brief with a paragraph of setup got
+interrupted on BUILD-2334 with "super short answer". The sentence it was missing was
+"yes, the bump waits on a tag, and the noise can be fixed without it".
+
 Log each answer the moment it arrives, to
 `<Designs Directory>/.clarifications-BUILD-XXXX.md`, under a dated subheading. Save that
 file after every answer.
@@ -161,6 +167,13 @@ printf '%s@%s:%s\n' "$(basename "$CP")" "$(git -C "$CP" rev-parse --short HEAD)"
 ```
 
 Without the commit, a local citation looks precise and is not.
+
+**Pin once, in a header table, not on every citation.** A spec that repeats
+`repo@sha:path:line` on thirty claims is the citation wall this skill's readers cut.
+List each repo and the commit it was read at in a single table under `## Context`, then
+cite `path:line` alone in the body. Grade A asks that the commit be recoverable for
+every claim, not that it sit adjacent to every line number, and one table satisfies that
+while keeping the prose readable.
 
 A story routed to `exposure-gap` or `plugin-gap` on grade C or D evidence carries a
 `[NEEDS CLARIFICATION]` marker rather than a confident plan.
@@ -306,6 +319,15 @@ Watch for the lexical trap: a story can say "plugin" and mean something else ent
 `crane-lib`'s `transform/kubernetes` has its own plugin type unrelated to this repo.
 Confirm which codebase the words point at before assuming it is ours.
 
+The same goes for any claim about what exists today. A description written before the
+2026-08-13 repo move describes crane-lib, and a function it names may never have reached
+this repo. Grep the target repo at HEAD for every symbol, file and behaviour the
+description says is there before building on it. BUILD-2334 said `cleanNullFields`
+strips nulls today and must be deleted. It only ever existed on an unmerged crane-lib
+branch, and the plugin was emitting the nulls with no workaround at all. The story's
+scope item read "delete the workaround"; the true scope item was "there is no
+workaround".
+
 Answer one question: *should this be built?* Check cheapest first and stop at the first
 hit. This phase runs before any expensive research, because four documents in the prior
 corpus reached "already implemented" only after full research had been written up.
@@ -344,7 +366,13 @@ jira issue list --jql "project = BUILD AND (summary ~ '<feature-keyword>' OR des
 # 2. Merged code. Blind spot: the symbol may be named nothing like the feature, and the
 #    work may live outside converter.go. Grep the package, not one file, and search for
 #    the behaviour as well as the name.
-grep -rn "<feature-keyword>" "<Target Repo>"
+#    Exclude .claude: the plugin repo keeps git worktrees under .claude/worktrees/, and
+#    each one is a full copy of the tree. Without the exclusion a single real hit arrives
+#    buried in one duplicate per worktree, and the file list alone can run past a hundred
+#    lines. .gstack holds the browse tool's untracked network and console logs at the
+#    repo root, and any string a visited page served can turn up in them.
+grep -rn --exclude-dir=.claude --exclude-dir=.gstack --exclude-dir=vendor --exclude-dir=.git \
+  "<feature-keyword>" "<Target Repo>"
 
 # 3. Merged PRs. This is the one that finds delivered work. --state open cannot: a
 #    merged PR is closed, so searching open PRs alone reports "not started" on finished
@@ -372,6 +400,15 @@ users independently need it in Shipwright?
 **2d. Related and blocking work.** Any sibling story that should be grouped or sequenced
 first, and any issue this blocks or is blocked by.
 
+A closed blocker is not a shipped blocker. Jira closes a story when its PR merges, and
+this story may need what that PR produces, which is a later event. Name the artifact
+this story consumes and check that it exists. For an upstream code change that is a tag
+containing the commit, not a merged PR, and `git tag --contains <sha>` on the upstream
+clone answers it in one line. BUILD-2334 arrived with BUILD-1743 Closed and its PR merged
+on Shipwright `main`, while every tag cut since came from a release branch without it.
+Read as "blocker closed", the story looked ready. Read as "artifact missing", it was a
+wait, and `blocked-on` below is where it goes.
+
 ### Terminal outcomes
 
 This phase may end the run. Record one of:
@@ -382,6 +419,7 @@ This phase may end the run. Record one of:
 | `not-needed` | Should not be built | A stated reason |
 | `superseded-by BUILD-XXXX` | Another story covers it | The story key |
 | `out-of-scope` | The fix belongs to a repo this skill does not cover | The owning repo, and why |
+| `blocked-on <artifact>` | Needed, but an external artifact does not exist yet | The artifact by name, and the check that showed it missing |
 | `proceed` | Continue to Phase 3 | — |
 
 **A bundled story gets one outcome per scope item, not one for the story.** Real stories
@@ -394,6 +432,7 @@ necessity_by_scope:
   - param validation: proceed
   - golden test: N/A — covered by BUILD-2328
   - pre-flight checks: not-needed — closed won't-do on BUILD-2039, offline plugin
+  - version bump: blocked-on shipwright-io/build tag containing 3a4da666
 ```
 
 The top-level `necessity` is the outcome that governs the run: `proceed` if any item
@@ -404,6 +443,13 @@ stop. The spec is still written: a story that should not be built deserves a rec
 why, so nobody re-triages it in three months.
 
 See **What a spec must contain** below for what a terminated run writes.
+
+`blocked-on` is the one terminal outcome that expects a second run. Its Jira comment
+names the artifact and the command that will show it has arrived, so the wait has a
+concrete end. Its spec carries the Phase 0 to 2 evidence and stops there, and the next
+run starts from that file rather than from the Jira text. The run itself is DONE, not
+BLOCKED: the spec and the comment were written. BLOCKED is for the skill being unable
+to run at all.
 
 ## Phase 3: Capability and prior art
 
@@ -428,13 +474,41 @@ Choosing the conversion walk for a plugin-behaviour story produces three links m
 1. **Engine** — does buildah or s2i support it, at the pinned tag?
 2. **API** — does the Shipwright Build API have a field for it?
 3. **Strategy** — does a ClusterBuildStrategy expose it?
-4. **Plugin** — does `converter.go` emit it, or warn-and-drop?
+4. **Plugin** — two questions, in this order. First, can the plugin *obtain* what it
+   would need: is the input in the BuildConfig itself, or does it require another
+   resource, a cluster lookup, or a flag that does not exist? Only then: does
+   `converter.go` emit it, or warn-and-drop?
+
+The Plugin link asks two questions because a mapping can be impossible rather than
+merely missing, and the difference decides whether the story has an implementation at
+all. `PluginRequest` carries one resource plus a flat `Extras` map (Crane Lib Repo,
+`transform/plugin.go`), and the plugin has no cluster access, so a story asking the
+converter to read a ServiceAccount, a Secret, or any sibling resource has nowhere to
+read it from no matter what the API and the strategy support. Answer availability
+first: a `plugin-gap` recorded against an input the plugin cannot see is really a
+not-implementable scope item, and belongs in `necessity_by_scope` with a `D-N`
+recording the constraint and its escape clause.
 
 **Plugin walk.** No upstream chain applies; the question is what the plugin does today
 and what the target can accept.
 
 1. **Current behaviour** — what does the plugin do now? Cite the exact code path,
-   including the early return or branch that decides it.
+   including the early return or branch that decides it. Then run it. A grep shows what
+   the code says and the binary shows what it emits, and the two disagreed on
+   BUILD-2334: no line of code mentioned null, and every emitted `paramValues` entry
+   carried three of them. Build to the scratch directory, feed it a fixture, read the
+   JSON:
+
+   ```bash
+   GOWORK=off go build -o "$SCRATCH/plugin" "$CP"
+   python3 -c 'import yaml,json,sys; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))' \
+     "$CP/tests/testdata/export/resources/myapp/BuildConfig_build.openshift.io_v1_myapp_webapp-docker.yaml" \
+     | "$SCRATCH/plugin" 2>/dev/null | python3 -m json.tool | grep -n "<field>"
+   ```
+
+   A fixture is already a `PluginRequest`: the exported resource inline, plus an optional
+   `extras` map for flags. `yq -o=json` does the same conversion if PyYAML is missing.
+   Ten seconds, grade A, and the citation is the commit the binary was built from.
 2. **Consumer tolerance** — who consumes this output, and can they accept the change?
    Identify the consumer first, because it is not always a cluster:
    - Shipwright, for anything applied to a cluster. An API type existing is not enough:
@@ -451,6 +525,14 @@ and what the target can accept.
 
 Both walks end in the same outcome enum. A link that genuinely does not apply is recorded
 as `n/a` with one line saying why, never silently skipped and never padded.
+
+**A dependency bump gets a trial in a scratch copy.** When a scope item says "bump X",
+copy the repo to the scratch directory, run `go get X@<ref>`, `go mod tidy`,
+`go build ./...` and `go test ./...`, and read the resulting `go.mod` diff. Do it before
+designing, because the result changes the design. On BUILD-2334 the fix commit resolved
+to a pseudo-version below the current pin, Go reported the bump as a downgrade, and any
+later `go get -u` would have reverted it. A spec written from the changelog alone would
+have recommended it.
 
 Each link is one grep or one pinned fetch. Stop as soon as you find the gap; everything
 downstream of a gap is moot.
@@ -598,8 +680,14 @@ else
 fi
 # 2. Every section its phases require is present (see "What a spec must contain")
 grep -c "^## " "$SPEC"
-# 3. Every destination-needs row dispositioned, when that table is required
-sed -n '/^## Destination-needs/,/^## /p' "$SPEC" | grep "^|" | grep -vc "story:\|N/A:"   # want 0
+# 3. Every destination-needs row dispositioned, when that table is required.
+#    Strip the header and separator rows first. Both match "^|" and neither carries a
+#    disposition, so counting them made this check report 2 on a perfectly clean table
+#    and 0 was unreachable. The header match is case-insensitive: every spec written so
+#    far capitalises it ("Source field / state"), and a case-sensitive match counted it.
+sed -n '/^## Destination-needs/,/^## /p' "$SPEC" | grep "^|" \
+  | grep -iv "^|[[:space:]]*source field" | grep -v "^|[-|[:space:]]*$" \
+  | grep -vc "story:\|N/A:"   # want 0
 # 4. Every D-N heading has a body
 grep -c "^### D-[0-9]" "$SPEC"
 ```
@@ -732,7 +820,9 @@ topic_class: <buildah-flag|s2i-flag|api-change|field-mapping|plugin-policy|crane
 ceremony_class: <trivial|bounded|forked>
 ceremony_signal: <the numbered signal that decided the class, or "none — default">
 ceremony_upgraded_from: <omit unless the class ratcheted mid-run>
-necessity: <proceed|already-done|not-needed|superseded-by BUILD-XXXX>
+necessity: <proceed|already-done|not-needed|superseded-by BUILD-XXXX|out-of-scope|blocked-on <artifact>>
+necessity_by_scope: <omit unless the story bundles several requests; otherwise one entry
+  per scope item, each ending in its own terminal outcome — see Phase 2>
 capability: <engine-gap|api-gap|exposure-gap|plugin-gap|prior-art-found|already-supported>
 evidence_grade: <A|B|C|D>
 ---
