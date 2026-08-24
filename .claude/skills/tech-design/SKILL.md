@@ -141,9 +141,39 @@ a paragraph of setup was rejected and rewritten on request as twelve short lines
 two-sentence problem, three one-line options, "which one: A, B, or C?". That version
 got a one-word answer.
 
+That version is the shape. Write every question and checkpoint to it:
+
+```text
+Q<N> — <one-line title>
+<What the thing is and what is at stake, in one or two plain sentences that a reader
+who has not seen the research can follow.>
+Recommendation: <option> because <one plain reason>.
+A) <option, one line, an outcome not a mechanism>
+B) <option, one line>
+C) <option, one line, only when a real third exists>
+Reply with a letter.
+```
+
+`Q<N>` counts questions within a run, starting at Q1, and keeps them apart from the
+spec's `D-N` decision ids; the two fixed checkpoints use the same shape without a
+number. This is gstack's prose decision brief with the completeness scores and the
+per-option pros and cons removed, because those bullets are the density the cards were
+rejected for. The BUILD-2340 question that got the one-word answer, for the record:
+
+> Q1 — Inline Dockerfile
+> Some BuildConfigs have the Dockerfile typed directly into them instead of in the git
+> repo. Today we print an error and throw that text away. The buildah strategy cannot
+> take Dockerfile text, so the build will not run either way; the only question is
+> whether to keep the text.
+> Recommendation: A because nothing is lost and the user can copy it into the repo later.
+> A) Put the text in a ConfigMap next to the Build.
+> B) Keep throwing it away and warn.
+> C) Put the text in an annotation on the Build.
+> Reply with a letter.
+
 Log each answer the moment it arrives, to
-`<Designs Directory>/.clarifications-BUILD-XXXX.md`, under a dated subheading. Save that
-file after every answer.
+`<Designs Directory>/.clarifications-BUILD-XXXX.md`, under a dated subheading, as
+`- Q<N>: <question> → A: <answer>`. Save that file after every answer.
 
 This is a scratch file, not the spec, and the distinction is what keeps the Iron Law
 intact. An answer a human gave is the one thing in a run that cannot be recovered by
@@ -931,7 +961,7 @@ The approach, in enough detail that no design decisions remain.
 
 ## Clarifications
 ### Session YYYY-MM-DD
-- Q: <question> → A: <answer>
+- Q1: <question> → A: <answer>
 
 ---
 NO UNRESOLVED MARKERS
