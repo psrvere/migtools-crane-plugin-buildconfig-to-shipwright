@@ -177,6 +177,12 @@ Non-zero means the branch is behind. Report it. If the branch is behind on files
 touches, the findings may not survive a rebase — cap the verdict at
 `READY WITH WARNINGS` and annotate `STALE: rebase before merge`.
 
+This count is a point-in-time snapshot: `origin/main` can move during a long review (it
+did this session — 17 commits landed mid-run). This skill is report-only and never pushes,
+so a moved base does not corrupt anything here, but the verdict must say the check was
+taken at Stage 0. The caller that acts on the branch (`/tech-implement`) re-fetches and
+rebases before it amends or pushes, so it — not this skill — owns the final freshness gate.
+
 ### 0d. Probe the CLI reviewers
 
 ```bash
@@ -313,6 +319,13 @@ Read each file's body and pass it as the sub-agent prompt with
 — do not look for them in the agent registry. Map the `model:` field in each file's
 frontmatter to the Agent tool's `model` parameter.
 
+**Model-availability fallback.** If a dispatch fails because the requested model is not
+available to sub-agents on this deployment (e.g. an Opus session model that sub-agents
+cannot use — the error names the model), re-dispatch that reviewer with `model: sonnet`.
+This applies to every reviewer here and to the `model: opus` challenger in Stage 4. A
+reviewer or challenger dropped on a model error is a coverage gap, not a pass — never let
+it silently vanish from the report.
+
 Give every sub-agent the branch name, the merge base, the changed-file list, the worktree
 path `$WT` (their working directory and the single review target), the scratchpad path
 `$SCRATCH` (where it writes its findings JSON), and the contents of `findings-schema.md`.
@@ -329,8 +342,21 @@ of these hold:
 - the diff modifies Shipwright API types
 
 Below the threshold, record `SKIPPED — below threshold` and name which conditions were
-checked. It is a fan-out inside a fan-out, spawning six to fourteen personas beneath our
-own sub-agent, and `/deep-review` performs the deep multi-persona pass at PR time.
+checked. It is a fan-out inside a fan-out, spawning six to fourteen personas, and
+`/deep-review` performs the deep multi-persona pass at PR time.
+
+**Dispatch it at the orchestrator level, not as a wrapped sub-agent.** `ce-code-review` is
+itself a fan-out skill: it spawns its own pool of persona sub-agents. If you wrap it in a
+general-purpose sub-agent (the `reviewers/ce-code-review.md` prompt), that wrapper returns
+before its grandchildren finish and never writes the JSON — the escalation silently
+produces nothing. Instead, **you (the orchestrator) invoke `compound-engineering:ce-code-review`
+directly via the Skill tool**, with `mode:agent base:<merge-base>`, run with the current
+working directory set to the review worktree `$WT` so it diffs the right tree. Block on its
+result, then map its findings into the schema yourself. It does not need — and must not
+get — an extra agent layer around it. (If a future harness makes a wrapper unavoidable, the
+wrapper must poll `$SCRATCH/ce-code-review.json` until it appears rather than ending its
+turn early.) The other Stage 3 reviewers stay as parallel sub-agents; only this one is
+promoted to a direct orchestrator call.
 
 ---
 
@@ -428,6 +454,15 @@ No design doc means SKIPPED, not a finding.
 
 Read every findings file from `$SCRATCH` (each reviewer wrote `$SCRATCH/<source>.json`).
 Consolidation reads disk, not conversation context, so it survives compaction.
+
+**First, account for every reviewer you dispatched.** For each one, a `$SCRATCH/<source>.json`
+must exist. A dispatched reviewer with no file is `failed` — name it in the report as such
+and never let its absence read as a clean zero. (This is exactly how the ce-code-review
+escalation failed silently before it was promoted to a direct orchestrator call.) A CLI
+reviewer whose file reports `ok` with empty findings but whose own note says it saw no diff
+or no changed files — while the Stage 0b diff is non-empty — is also `failed`/degraded, not
+a clean pass; re-run it or report it degraded. Do not build the verdict until every
+dispatched reviewer is either a real result or a named failure.
 
 Deduplicate by file and line: findings within three lines of each other that describe
 the same problem merge into one, keeping the more specific description and listing every

@@ -12,6 +12,15 @@ tools: Bash, Read, Skill
 You run `compound-engineering:ce-code-review` and translate its output into this skill's
 findings schema.
 
+> **Run this at the orchestrator level, not as a wrapped sub-agent.** `ce-code-review` is
+> itself a fan-out skill that spawns its own persona sub-agents. A general-purpose wrapper
+> that invokes it returns before those grandchildren finish and writes no JSON — the
+> escalation silently produces nothing (observed twice in practice). So the tech-review
+> orchestrator invokes the Skill tool **directly** and follows the mapping steps below
+> itself. Treat this file as the orchestrator's instructions for the escalation, not a
+> sub-agent prompt. Only if a future harness forces a wrapper, that wrapper must poll
+> `$SCRATCH/ce-code-review.json` until it appears instead of ending its turn.
+
 You are dispatched only when the diff is large or touches something risky. The
 orchestrator evaluates that threshold before spawning you, so if you are running, the
 diff has already earned the cost.
@@ -36,6 +45,15 @@ API contracts, data migrations, and the always-on correctness and testing person
 
    Pass `base:<merge-base-sha>` so it reviews this branch's true delta rather than
    detecting a base itself.
+
+   **Run it against the review worktree `$WT`.** The `base:` fast path computes
+   `git merge-base HEAD <base>` in the *current* working directory. If the current checkout
+   is on some other branch (it usually is — the branch under review lives in `$WT`, a
+   detached worktree), it will diff the wrong tree and review the wrong code. Set the
+   working directory to `$WT` before invoking, or otherwise make ce-code-review diff `$WT`.
+   Its personas inherit the session model; if that model is unavailable to sub-agents on
+   this deployment, ce-code-review's own reviewers fall back — but if the whole invocation
+   fails on model availability, note it and do not report a clean escalation.
 
 2. If the skill is not available — the compound-engineering plugin is not installed, or
    is installed but not enabled — write:

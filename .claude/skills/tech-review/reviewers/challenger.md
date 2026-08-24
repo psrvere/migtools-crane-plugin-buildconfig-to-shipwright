@@ -60,6 +60,20 @@ For each blocking finding:
    A real problem on a line the branch never touched is `pre-existing`, not a blocker.
    Downgrade it rather than removing it.
 
+   **Check the finding's *mechanism* against the base ref, not just the branch tip.** A
+   finding can cite a line the branch touched while the behaviour it describes already
+   existed at the base — the branch merely moved it. Read the same construct at the base:
+
+   ```bash
+   git -C "$WT" show "$MERGE_BASE":<file> | grep -n "<the construct>"
+   ```
+
+   If the base already behaves the same way, the finding is `pre-existing`, not a blocker
+   this branch introduced. This session's two adversarial "escapes" both dissolved this
+   way: the resources-gated BuildRun template and the raw named-ServiceAccount path both
+   predated the change. Verifying the mechanism at the base — not only whether the line is
+   in the diff — is what tells a real regression from inherited behaviour.
+
 3. **Calibrate the severity.** Is `blocker` proportionate? A blocker means the build
    breaks, wrong data ships, or a security boundary fails. Style, naming, and
    nice-to-have refactors are not blockers however confidently they are argued.
