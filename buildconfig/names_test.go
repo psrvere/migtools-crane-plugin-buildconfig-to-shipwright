@@ -163,52 +163,9 @@ func TestCollidingTruncatedNamesGetDistinctNames(t *testing.T) {
 	}
 }
 
-func TestSharedServiceAccountMergesImagePullSecrets(t *testing.T) {
-	logger, _ := logrustest.NewNullLogger()
-	converter := &Converter{Log: logger, Opts: PluginOptionalFields{}}
-
-	convert := func(bc *buildv1.BuildConfig) []unstructured.Unstructured {
-		t.Helper()
-		resources, outcome := converter.Convert(bc)
-		if outcome.State == OutcomeFailed {
-			t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
-		}
-		return resources
-	}
-
-	first := convert(newNameTestBC("app-one", "myns", "shared-builder", "secret-a"))
-	firstSA := serviceAccountFromResources(t, first)
-	if len(firstSA.ImagePullSecrets) != 1 || firstSA.ImagePullSecrets[0].Name != "secret-a" {
-		t.Fatalf("first SA imagePullSecrets = %v, want [secret-a]", firstSA.ImagePullSecrets)
-	}
-
-	second := convert(newNameTestBC("app-two", "myns", "shared-builder", "secret-b"))
-	secondSA := serviceAccountFromResources(t, second)
-
-	if secondSA.Name != "shared-builder" {
-		t.Errorf("shared SA name = %q, want %q", secondSA.Name, "shared-builder")
-	}
-
-	gotPull := []string{}
-	for _, s := range secondSA.ImagePullSecrets {
-		gotPull = append(gotPull, s.Name)
-	}
-	if len(gotPull) != 2 || gotPull[0] != "secret-a" || gotPull[1] != "secret-b" {
-		t.Errorf("merged SA imagePullSecrets = %v, want [secret-a secret-b]", gotPull)
-	}
-
-	gotSecrets := []string{}
-	for _, s := range secondSA.Secrets {
-		gotSecrets = append(gotSecrets, s.Name)
-	}
-	if len(gotSecrets) != 2 || gotSecrets[0] != "secret-a" || gotSecrets[1] != "secret-b" {
-		t.Errorf("merged SA secrets = %v, want [secret-a secret-b]", gotSecrets)
-	}
-
-	// Re-using an already-merged secret must not duplicate it.
-	third := convert(newNameTestBC("app-three", "myns", "shared-builder", "secret-b"))
-	thirdSA := serviceAccountFromResources(t, third)
-	if len(thirdSA.ImagePullSecrets) != 2 {
-		t.Errorf("duplicate pull secret was not deduplicated: %v", thirdSA.ImagePullSecrets)
-	}
-}
+// The in-process pull-secret merge for a shared named ServiceAccount was removed
+// in BUILD-2315 (D-3): crane runs the plugin once per resource in its own
+// process, so the merge could never see two BuildConfigs, and a BuildConfig that
+// names its own ServiceAccount no longer generates one at all (D-1). The
+// behaviour that replaces it — no ServiceAccount emitted, a link-command warning
+// — is covered by TestNamedServiceAccountWithPullSecretIsNotGenerated.

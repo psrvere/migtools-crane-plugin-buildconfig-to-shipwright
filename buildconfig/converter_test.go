@@ -13,8 +13,10 @@ import (
 	shipwrightv1beta1 "github.com/shipwright-io/build/pkg/apis/build/v1beta1"
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
 )
 
@@ -2442,72 +2444,168 @@ func TestConvertResourcesCustomStrategyOmitsStepResources(t *testing.T) {
 	}
 }
 
-// TestGenerateServiceAccountWarnsOnSharedServiceAccount covers the CodeRabbit
-// finding on BUILD-2261: crane runs this plugin once per resource in its own
-// process, so a ServiceAccount named by spec.serviceAccount and shared with
-// other BuildConfigs is emitted with only this BuildConfig's pull secret. The
-// conversion cannot merge the others, so it must warn instead of losing them
-// silently.
-func TestGenerateServiceAccountWarnsOnSharedServiceAccount(t *testing.T) {
-	tests := []struct {
-		name           string
-		serviceAccount string
-		wantSAName     string
-		wantWarn       bool
-	}{
-		{
-			name:           "shared serviceAccount warns",
-			serviceAccount: "builder",
-			wantSAName:     "builder",
-			wantWarn:       true,
-		},
-		{
-			name:       "serviceAccount derived from BuildConfig name does not warn",
-			wantSAName: "myapp",
-			wantWarn:   false,
-		},
+// TestNamedServiceAccountWithPullSecretIsNotGenerated covers BUILD-2315 D-1:
+// when a BuildConfig names its own ServiceAccount and also carries a pull secret,
+// the plugin must not emit a same-named ServiceAccount. crane migrates the named
+// account as its own resource and this plugin never sees it, so a same-named
+// object would overwrite it (crane keeps the last duplicate; imagePullSecrets is
+// atomic on apply). Instead the plugin keeps the named account in the BuildRun
+// template and warns with the exact oc secrets link command.
+func TestNamedServiceAccountWithPullSecretIsNotGenerated(t *testing.T) {
+	logger, _ := logrustest.NewNullLogger()
+	converter := &Converter{Log: logger}
+
+	bc := parseBuildConfigJSON(t, `{
+		"apiVersion": "build.openshift.io/v1",
+		"kind": "BuildConfig",
+		"metadata": {"name": "myapp", "namespace": "myns"},
+		"spec": {
+			"serviceAccount": "builder",
+			"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
+			"strategy": {"type": "Docker", "dockerStrategy": {"pullSecret": {"name": "my-pull-secret"}}},
+			"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/myapp:latest"}},
+			"resources": {"limits": {"memory": "2Gi"}}
+		}
+	}`)
+
+	result, outcome := converter.Convert(bc)
+	if outcome.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger, hook := logrustest.NewNullLogger()
-			converter := &Converter{Log: logger}
+	// AC 1: no ServiceAccount is emitted.
+	for _, r := range result {
+		if r.GetKind() == "ServiceAccount" {
+			t.Fatalf("expected no ServiceAccount in NewResources, got one named %q", r.GetName())
+		}
+	}
 
-			serviceAccount := ""
-			if tt.serviceAccount != "" {
-				serviceAccount = fmt.Sprintf(`"serviceAccount": %q,`, tt.serviceAccount)
-			}
-			bc := parseBuildConfigJSON(t, fmt.Sprintf(`{
-				"apiVersion": "build.openshift.io/v1",
-				"kind": "BuildConfig",
-				"metadata": {"name": "myapp", "namespace": "myns"},
-				"spec": {
-					%s
-					"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
-					"strategy": {"type": "Docker", "dockerStrategy": {"pullSecret": {"name": "my-pull-secret"}}},
-					"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/myapp:latest"}}
-				}
-			}`, serviceAccount))
+	// AC 2: the BuildRun template keeps the named account.
+	value, ok := result[0].GetAnnotations()[BuildRunTemplateAnnotation]
+	if !ok {
+		t.Fatalf("expected annotation %s on the Build", BuildRunTemplateAnnotation)
+	}
+	tmpl := unmarshalBuildRunTemplate(t, value)
+	if tmpl.Spec.ServiceAccount == nil || *tmpl.Spec.ServiceAccount != "builder" {
+		t.Errorf("expected BuildRun spec.serviceAccount builder, got %v", tmpl.Spec.ServiceAccount)
+	}
 
-			sa := converter.generateServiceAccount(bc, converter.getPullSecret(bc))
-			if sa == nil {
-				t.Fatal("expected a generated ServiceAccount")
-			}
-			if sa.Name != tt.wantSAName {
-				t.Errorf("expected ServiceAccount name %q, got %q", tt.wantSAName, sa.Name)
-			}
+	// AC 3: exactly one warning carries the ready-to-run oc secrets link command,
+	// and the outcome annotation records converted-with-warnings.
+	wantCmd := "oc -n myns secrets link builder my-pull-secret --for=pull,mount"
+	linkWarnings := 0
+	for _, w := range outcome.Warnings {
+		if strings.Contains(w, wantCmd) {
+			linkWarnings++
+		}
+	}
+	if linkWarnings != 1 {
+		t.Errorf("expected exactly one warning containing %q, got %d: %v", wantCmd, linkWarnings, outcome.Warnings)
+	}
+	if got := result[0].GetAnnotations()[ConversionOutcomeAnnotation]; got != string(OutcomeConvertedWithWarnings) {
+		t.Errorf("expected conversion-outcome %q, got %q", OutcomeConvertedWithWarnings, got)
+	}
+}
 
-			gotWarn := false
-			for _, entry := range hook.AllEntries() {
-				if entry.Level == logrus.WarnLevel &&
-					strings.Contains(entry.Message, "it may share with other BuildConfigs") {
-					gotWarn = true
-				}
-			}
-			if gotWarn != tt.wantWarn {
-				t.Errorf("expected shared-ServiceAccount warning %v, got %v", tt.wantWarn, gotWarn)
-			}
-		})
+// TestGeneratedServiceAccountCarriesPullSecret covers BUILD-2315 D-1's other
+// branch: with a pull secret and no named ServiceAccount the plugin still
+// generates a <bc-name> account carrying that secret in both imagePullSecrets and
+// secrets, and prints no oc secrets link warning.
+func TestGeneratedServiceAccountCarriesPullSecret(t *testing.T) {
+	logger, _ := logrustest.NewNullLogger()
+	converter := &Converter{Log: logger}
+
+	bc := parseBuildConfigJSON(t, `{
+		"apiVersion": "build.openshift.io/v1",
+		"kind": "BuildConfig",
+		"metadata": {"name": "myapp", "namespace": "myns"},
+		"spec": {
+			"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
+			"strategy": {"type": "Docker", "dockerStrategy": {"pullSecret": {"name": "my-pull-secret"}}},
+			"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/myapp:latest"}}
+		}
+	}`)
+
+	result, outcome := converter.Convert(bc)
+	if outcome.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
+	}
+
+	var sa *corev1.ServiceAccount
+	saCount := 0
+	for _, r := range result {
+		if r.GetKind() != "ServiceAccount" {
+			continue
+		}
+		saCount++
+		decoded := &corev1.ServiceAccount{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(r.Object, decoded); err != nil {
+			t.Fatalf("failed to decode ServiceAccount: %v", err)
+		}
+		sa = decoded
+	}
+	if saCount != 1 {
+		t.Fatalf("expected exactly one ServiceAccount, got %d", saCount)
+	}
+	if sa.Name != "myapp" || sa.Namespace != "myns" {
+		t.Errorf("expected ServiceAccount myns/myapp, got %s/%s", sa.Namespace, sa.Name)
+	}
+	wantPull := []corev1.LocalObjectReference{{Name: "my-pull-secret"}}
+	if !reflect.DeepEqual(sa.ImagePullSecrets, wantPull) {
+		t.Errorf("expected imagePullSecrets %v, got %v", wantPull, sa.ImagePullSecrets)
+	}
+	wantSecrets := []corev1.ObjectReference{{Name: "my-pull-secret"}}
+	if !reflect.DeepEqual(sa.Secrets, wantSecrets) {
+		t.Errorf("expected secrets %v, got %v", wantSecrets, sa.Secrets)
+	}
+
+	for _, w := range outcome.Warnings {
+		if strings.Contains(w, "secrets link") {
+			t.Errorf("did not expect a secrets link warning, got %q", w)
+		}
+	}
+}
+
+// TestNamedServiceAccountWithSourcePullSecretIsNotGenerated mirrors the named-SA
+// case for a Source (S2I) strategy pull secret. getPullSecret reads the pull
+// secret from either strategy, so the D-1 branch must behave identically: no
+// ServiceAccount emitted and the same oc secrets link warning.
+func TestNamedServiceAccountWithSourcePullSecretIsNotGenerated(t *testing.T) {
+	logger, _ := logrustest.NewNullLogger()
+	converter := &Converter{Log: logger}
+
+	bc := parseBuildConfigJSON(t, `{
+		"apiVersion": "build.openshift.io/v1",
+		"kind": "BuildConfig",
+		"metadata": {"name": "myapp", "namespace": "myns"},
+		"spec": {
+			"serviceAccount": "builder",
+			"source": {"type": "Git", "git": {"uri": "https://github.com/example/myapp.git"}},
+			"strategy": {"type": "Source", "sourceStrategy": {"from": {"kind": "DockerImage", "name": "registry.example.com/builder:latest"}, "pullSecret": {"name": "my-pull-secret"}}},
+			"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/myapp:latest"}}
+		}
+	}`)
+
+	result, outcome := converter.Convert(bc)
+	if outcome.State == OutcomeFailed {
+		t.Fatalf("unexpected conversion failure: %s", outcome.Reason)
+	}
+
+	for _, r := range result {
+		if r.GetKind() == "ServiceAccount" {
+			t.Fatalf("expected no ServiceAccount in NewResources, got one named %q", r.GetName())
+		}
+	}
+
+	wantCmd := "oc -n myns secrets link builder my-pull-secret --for=pull,mount"
+	linkWarnings := 0
+	for _, w := range outcome.Warnings {
+		if strings.Contains(w, wantCmd) {
+			linkWarnings++
+		}
+	}
+	if linkWarnings != 1 {
+		t.Errorf("expected exactly one warning containing %q, got %d: %v", wantCmd, linkWarnings, outcome.Warnings)
 	}
 }
 

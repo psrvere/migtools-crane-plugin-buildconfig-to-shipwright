@@ -77,13 +77,6 @@ type Converter struct {
 	// that distinct originals resolving to the same sanitized name within a
 	// single converter lifetime are detected and disambiguated.
 	assignedNames map[string]string
-	// serviceAccounts caches generated ServiceAccounts by namespace/name so
-	// that BuildConfigs sharing a builder ServiceAccount merge their
-	// imagePullSecrets instead of overwriting each other. This only spans one
-	// Converter: crane invokes the plugin once per resource in a separate
-	// process, so BuildConfigs converted by different invocations cannot be
-	// merged here — generateServiceAccount warns when that case is possible.
-	serviceAccounts map[string]*corev1.ServiceAccount
 }
 
 // uniqueName sanitizes a generated resource name into a valid DNS-1123 label
@@ -165,13 +158,24 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	generatedSA := ""
 	pullSecret := c.getPullSecret(bc)
 	if pullSecret != nil {
-		sa := c.generateServiceAccount(bc, pullSecret)
-		generatedSA = sa.Name
-		saUnstructured, err := toUnstructured(sa)
-		if err != nil {
-			return nil, outcomeFailed(fmt.Sprintf("error converting ServiceAccount to unstructured: %v", err))
+		if bc.Spec.ServiceAccount != "" {
+			// crane migrates the named ServiceAccount as its own resource and
+			// this plugin never sees it, so emitting a same-named account would
+			// overwrite it (crane keeps the last duplicate; imagePullSecrets is
+			// an atomic list on apply). Leave the account alone and tell the
+			// operator how to attach the pull secret on the target.
+			c.warnf("BuildConfig %s/%s names ServiceAccount %q and pull secret %q. crane migrates that ServiceAccount as-is and this conversion does not modify it, so attach the pull secret on the target cluster before running the BuildRun: oc -n %s secrets link %s %s --for=pull,mount",
+				bc.Namespace, bc.Name, bc.Spec.ServiceAccount, pullSecret.Name,
+				bc.Namespace, bc.Spec.ServiceAccount, pullSecret.Name)
+		} else {
+			sa := c.generateServiceAccount(bc, pullSecret)
+			generatedSA = sa.Name
+			saUnstructured, err := toUnstructured(sa)
+			if err != nil {
+				return nil, outcomeFailed(fmt.Sprintf("error converting ServiceAccount to unstructured: %v", err))
+			}
+			newResources = append(newResources, saUnstructured)
 		}
-		newResources = append(newResources, saUnstructured)
 	}
 
 	// A ServiceAccount named by the BuildConfig exists on the source cluster and
@@ -685,35 +689,18 @@ func (c *Converter) getPullSecret(bc *buildv1.BuildConfig) *corev1.LocalObjectRe
 	return nil
 }
 
+// generateServiceAccount builds a ServiceAccount that carries the BuildConfig's
+// pull secret. It is only called when the BuildConfig names no ServiceAccount of
+// its own, so the generated name always derives from the BuildConfig name: a
+// named ServiceAccount is migrated by crane as its own resource and this plugin
+// must not emit a same-named object that would overwrite it.
 func (c *Converter) generateServiceAccount(bc *buildv1.BuildConfig, pullSecret *corev1.LocalObjectReference) *corev1.ServiceAccount {
 	if pullSecret == nil {
 		return nil
 	}
-	saName := bc.Spec.ServiceAccount
-	if saName == "" {
-		saName = bc.Name
-	}
-	saName = c.uniqueName("ServiceAccount", bc.Namespace, saName)
+	saName := c.uniqueName("ServiceAccount", bc.Namespace, bc.Name)
 
-	// A BuildConfig that names an existing ServiceAccount may share it with
-	// sibling BuildConfigs. crane runs this plugin once per resource in its own
-	// process, so ServiceAccounts generated for other BuildConfigs are not
-	// visible here: each conversion emits the ServiceAccount carrying only its
-	// own pull secret, and applying them in sequence keeps only the last one.
-	if bc.Spec.ServiceAccount != "" {
-		c.warnf("BuildConfig %s converts pull secret %q into ServiceAccount %q, which it may share with other BuildConfigs — pull secrets from BuildConfigs sharing this ServiceAccount are not merged, so review the generated imagePullSecrets before applying", bc.Name, pullSecret.Name, saName)
-	}
-
-	if c.serviceAccounts == nil {
-		c.serviceAccounts = map[string]*corev1.ServiceAccount{}
-	}
-	key := bc.Namespace + "/" + saName
-	if existing, ok := c.serviceAccounts[key]; ok {
-		mergePullSecret(existing, pullSecret.Name)
-		return existing
-	}
-
-	sa := &corev1.ServiceAccount{
+	return &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
 			Kind:       "ServiceAccount",
@@ -728,34 +715,6 @@ func (c *Converter) generateServiceAccount(bc *buildv1.BuildConfig, pullSecret *
 		Secrets: []corev1.ObjectReference{
 			{Name: pullSecret.Name},
 		},
-	}
-	c.serviceAccounts[key] = sa
-	return sa
-}
-
-// mergePullSecret adds secretName to the ServiceAccount's imagePullSecrets and
-// secrets lists if not already present, preserving previously merged entries.
-func mergePullSecret(sa *corev1.ServiceAccount, secretName string) {
-	hasPullSecret := false
-	for _, s := range sa.ImagePullSecrets {
-		if s.Name == secretName {
-			hasPullSecret = true
-			break
-		}
-	}
-	if !hasPullSecret {
-		sa.ImagePullSecrets = append(sa.ImagePullSecrets, corev1.LocalObjectReference{Name: secretName})
-	}
-
-	hasSecret := false
-	for _, s := range sa.Secrets {
-		if s.Name == secretName {
-			hasSecret = true
-			break
-		}
-	}
-	if !hasSecret {
-		sa.Secrets = append(sa.Secrets, corev1.ObjectReference{Name: secretName})
 	}
 }
 

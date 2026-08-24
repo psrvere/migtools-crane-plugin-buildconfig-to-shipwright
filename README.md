@@ -9,7 +9,7 @@ During crane's transform phase, this plugin:
 1. Detects `BuildConfig` resources in the exported namespace
 2. Whiteouts the original BuildConfig (marks it for deletion)
 3. Generates a corresponding Shipwright `Build` resource
-4. Optionally generates a `ServiceAccount` when pull secrets are referenced
+4. Generates a `ServiceAccount` named after the BuildConfig when a pull secret is referenced and the BuildConfig names no ServiceAccount; a named ServiceAccount is migrated by crane unchanged, and the plugin warns with the `oc secrets link` command that attaches the pull secret on the target
 
 All other resource types are passed through unchanged.
 
@@ -73,7 +73,7 @@ migration/transform/
   resources/
     BuildConfig_build.openshift.io_v1_myapp_myapp-build.yaml  # whiteout
     Build_shipwright.io_v1beta1_myapp_myapp-build.yaml         # new Shipwright Build
-    ServiceAccount_v1_myapp_myapp-build.yaml                   # if pull secrets used
+    ServiceAccount_v1_myapp_myapp-build.yaml                   # if a pull secret is used and no ServiceAccount is named
   ...
 ```
 
