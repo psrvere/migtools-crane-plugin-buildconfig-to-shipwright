@@ -242,6 +242,25 @@ the repo:
 GOWORK=off bash tests/e2e-transform.sh ; echo "exit=$?"
 ```
 
+The harness shells out to whatever `crane` is on `PATH`, and the plugin requires a `crane`
+new enough to carry the `NewResources` API. An older binary (e.g. `crane` v0.0.5) makes the
+transform emit only whiteouts with no Build, and `crane apply` reject `--overwrite` — the
+harness reports FAIL for code that is fine. Before blaming the branch, run the harness
+against `origin/main` too: a byte-identical failure there is a stale-`crane` environment
+problem, not a defect. When `crane` cannot be upgraded, skip the harness and use the stdin
+drive below as the offline conversion check — it exercises the same `plugin.Run` path
+without the crane binary. Record which check ran, and why, in the U7 report.
+
+**Any conversion, offline — drive the plugin binary directly** (`crane-conversion` /
+`field-mapping`, and the reliable fallback when the harness is blocked by a stale `crane`).
+The plugin reads a `PluginRequest` on stdin — the BuildConfig JSON inline, plus an optional
+`extras` map — and writes the `PluginResponse` (`isWhiteOut`, `newResources`) to stdout:
+
+```bash
+GOWORK=off go build -o "$WT_BIN/crane-plugin" .
+"$WT_BIN/crane-plugin" < buildconfig.json    # assert isWhiteOut + the expected newResources
+```
+
 **Warning and log-only behaviour** — build the plugin and drive it over stdin JSON, then
 read stderr. This is the whole test for any issue whose change is a warning, a log line, or
 a skip:
