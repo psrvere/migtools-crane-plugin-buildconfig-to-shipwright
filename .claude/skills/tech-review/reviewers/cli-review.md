@@ -82,6 +82,15 @@ no change anywhere else.
    - a restatement of the diff rather than a problem with it
    - about the local workspace rather than what CI builds
 
+   **Guard against a false clean.** If the tool reports it saw no changes / no diff / an
+   empty changed-file set while the review diff is non-empty, it did not actually review
+   this branch — report `status: failed` (or degraded) with that reason, not `status: ok`
+   with an empty array. An empty-but-clean result is only valid when the tool confirms it
+   examined the changed files and found nothing. (Observed with `qodo` this session: it ran
+   on its private copy, reported "no code changes detected vs merge base", and returned a
+   clean empty result that was really a miss — the uncommitted `/simplify` edits in the
+   copied tree were not on any commit, so its diff saw nothing.)
+
 4. Set `confidence` from how well the tool evidenced its claim. A finding citing a
    specific line and explaining a consequence is 8 or 9. A generic warning with no
    mechanism is 4 or 5.

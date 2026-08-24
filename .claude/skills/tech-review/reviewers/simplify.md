@@ -9,6 +9,14 @@ tools: Bash, Read, Skill
 
 # Simplify
 
+> **Run this at the orchestrator level, not as a wrapped sub-agent.** `/simplify` is itself a
+> fan-out skill that spawns its own reviewer agents. A general-purpose wrapper returns before
+> those finish and writes no `simplify.json`, so the pass silently produces nothing and its
+> edits never reach the worktree the Stage 3 reviewers see (observed in practice). So the
+> tech-review orchestrator invokes the `/simplify` Skill **directly** and follows the steps
+> below itself. Treat this file as the orchestrator's instructions, not a sub-agent prompt.
+> `$REPO` below is the review worktree `$WT`.
+
 You run the built-in `/simplify` skill over this branch and report what it changed.
 
 You run inside a disposable worktree of the branch (`$REPO` is that worktree, not the

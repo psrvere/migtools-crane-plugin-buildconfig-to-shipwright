@@ -177,6 +177,12 @@ Non-zero means the branch is behind. Report it. If the branch is behind on files
 touches, the findings may not survive a rebase — cap the verdict at
 `READY WITH WARNINGS` and annotate `STALE: rebase before merge`.
 
+This count is a point-in-time snapshot: `origin/main` can move during a long review (it
+did this session — 17 commits landed mid-run). This skill is report-only and never pushes,
+so a moved base does not corrupt anything here, but the verdict must say the check was
+taken at Stage 0. The caller that acts on the branch (`/tech-implement`) re-fetches and
+rebases before it amends or pushes, so it — not this skill — owns the final freshness gate.
+
 ### 0d. Probe the CLI reviewers
 
 ```bash
@@ -190,7 +196,9 @@ Record both results. They go in the compliance report whether present or not.
 Do not probe for skills this way. `/code-review`, `/simplify` and `ce-code-review` are
 not files on disk, and inspecting a plugin cache path would hardcode a home directory,
 depend on Claude Code internals, and still not reveal whether a plugin is *enabled*.
-Skill-backed reviewers report their own availability from inside their sub-agent.
+Their availability surfaces when you invoke them: all three are Skill-backed and run at the
+orchestrator level (Stages 2 and 3), so a failed or unavailable invocation is visible to you
+directly — record it as `unavailable`/`failed`, never a clean pass.
 
 ### 0e. Find the design doc
 
@@ -270,14 +278,25 @@ them twice. Report pending cluster evidence rather than blocking on it.
 
 ## Stage 2: Simplify
 
-Dispatch one sub-agent from `reviewers/simplify.md`, pointed at the worktree `$WT`. It
-runs sequentially, before the other reviewers, and it is the only reviewer that changes
-files — and it changes them only inside `$WT`, never the user's checkout.
+**Invoke `/simplify` at the orchestrator level, not as a wrapped sub-agent** — for the same
+reason `ce-code-review` is (see Stage 3). `/simplify` is itself a fan-out skill: it spawns
+its own altitude / reuse / simplification reviewers. Wrapped in a general-purpose sub-agent
+(the old `reviewers/simplify.md` dispatch), that wrapper returns before its grandchildren
+finish and writes no `simplify.json` — the pass silently produces nothing and its edits
+never land in the worktree the Stage 3 reviewers see. So **you (the orchestrator) invoke the
+`/simplify` Skill directly**, with the working directory set to the review worktree `$WT`,
+and follow `reviewers/simplify.md` yourself as your own instructions. Block on it before
+Stage 3.
 
 It runs first on purpose: its edits land in the worktree's diff, so the Stage 3 reviewers
-review them too. Run it last and nothing checks its output.
+review them too. Run it last and nothing checks its output. It is the only reviewer that
+changes files — and it changes them only inside `$WT`, never the user's checkout.
 
-After it returns, run the unit tests in the worktree:
+If `/simplify` cannot be invoked at all on this deployment, record it `unavailable` in the
+report — never a clean pass. Do not simplify by hand; that is a different act with different
+risk.
+
+After it completes, run the unit tests in the worktree:
 
 ```bash
 cd "$WT" && GOWORK=off go test ./... -count=1
@@ -292,15 +311,26 @@ branch and `/simplify`'s edits, so a blanket discard cannot touch anyone else's 
 
 ## Stage 3: Reviewers
 
-Dispatch these in **one message** so they run in parallel. Each writes its findings to
-disk and returns only a count.
+**Which reviewers are sub-agents and which run at the orchestrator level.** A reviewer that
+is *just a bash tool* (the CLI reviewers) runs fine wrapped in a sub-agent. A reviewer that
+*invokes a Skill* does not: `/code-review` and `ce-code-review` cannot be invoked from a
+sub-agent at all where the harness disables model invocation for sub-agents (`/code-review`
+returned exactly this in practice — "cannot be invoked via Skill tool
+(disable-model-invocation)"), and `ce-code-review` additionally fans out and returns before
+its children finish. So the rule is: **the two Skill-backed reviewers, `/code-review` and
+`ce-code-review`, run at the orchestrator level; only the CLI reviewers are dispatched as
+sub-agents.** (`/simplify`, also Skill-backed, is already orchestrator-level in Stage 2.)
 
-| Sub-agent | Prompt file | Dispatch when |
-|---|---|---|
-| `cli-review` (coderabbit) | `reviewers/cli-review.md` | `coderabbit` on PATH and not excluded by `--cli` |
-| `cli-review` (qodo) | `reviewers/cli-review.md` | `qodo` on PATH and not excluded by `--cli` |
-| `code-review` | `reviewers/code-review.md` | Always |
-| `ce-code-review` | `reviewers/ce-code-review.md` | Escalation threshold met — see below |
+| Reviewer | How to run | Prompt / instructions | When |
+|---|---|---|---|
+| `cli-review` (coderabbit) | **sub-agent** | `reviewers/cli-review.md` | `coderabbit` on PATH and not excluded by `--cli` |
+| `cli-review` (qodo) | **sub-agent** | `reviewers/cli-review.md` | `qodo` on PATH and not excluded by `--cli` |
+| `code-review` | **orchestrator-level** (invoke `/code-review` yourself) | `reviewers/code-review.md` | Always |
+| `ce-code-review` | **orchestrator-level** (invoke the Skill yourself) | `reviewers/ce-code-review.md` | Escalation threshold met — see below |
+
+Dispatch the **CLI sub-agents in one message** so they run in parallel; run the two
+orchestrator-level reviewers yourself alongside them. Each writes its findings JSON to
+`$SCRATCH` and (for sub-agents) returns only a count.
 
 Resolve the prompt directory once:
 
@@ -308,10 +338,20 @@ Resolve the prompt directory once:
 SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/tech-review"
 ```
 
-Read each file's body and pass it as the sub-agent prompt with
-`subagent_type: general-purpose`. These files are prompt content, not registered agents
-— do not look for them in the agent registry. Map the `model:` field in each file's
-frontmatter to the Agent tool's `model` parameter.
+For the **CLI sub-agents**, read the file's body and pass it as the sub-agent prompt with
+`subagent_type: general-purpose`; these files are prompt content, not registered agents.
+For the **orchestrator-level reviewers**, read `reviewers/code-review.md` and
+`reviewers/ce-code-review.md` as your *own* instructions: invoke the Skill directly with the
+working directory set to `$WT`, block on it, and map its findings into the schema yourself.
+Map the `model:` field in each sub-agent file's frontmatter to the Agent tool's `model`
+parameter.
+
+**Model-availability fallback.** If a dispatch fails because the requested model is not
+available to sub-agents on this deployment (e.g. an Opus session model that sub-agents
+cannot use — the error names the model), re-dispatch that reviewer with `model: sonnet`.
+This applies to every reviewer here and to the `model: opus` challenger in Stage 4. A
+reviewer or challenger dropped on a model error is a coverage gap, not a pass — never let
+it silently vanish from the report.
 
 Give every sub-agent the branch name, the merge base, the changed-file list, the worktree
 path `$WT` (their working directory and the single review target), the scratchpad path
@@ -329,8 +369,21 @@ of these hold:
 - the diff modifies Shipwright API types
 
 Below the threshold, record `SKIPPED — below threshold` and name which conditions were
-checked. It is a fan-out inside a fan-out, spawning six to fourteen personas beneath our
-own sub-agent, and `/deep-review` performs the deep multi-persona pass at PR time.
+checked. It is a fan-out inside a fan-out, spawning six to fourteen personas, and
+`/deep-review` performs the deep multi-persona pass at PR time.
+
+**Dispatch it at the orchestrator level, not as a wrapped sub-agent.** `ce-code-review` is
+itself a fan-out skill: it spawns its own pool of persona sub-agents. If you wrap it in a
+general-purpose sub-agent (the `reviewers/ce-code-review.md` prompt), that wrapper returns
+before its grandchildren finish and never writes the JSON — the escalation silently
+produces nothing. Instead, **you (the orchestrator) invoke `compound-engineering:ce-code-review`
+directly via the Skill tool**, with `mode:agent base:<merge-base>`, run with the current
+working directory set to the review worktree `$WT` so it diffs the right tree. Block on its
+result, then map its findings into the schema yourself. It does not need — and must not
+get — an extra agent layer around it. (If a future harness makes a wrapper unavoidable, the
+wrapper must poll `$SCRATCH/ce-code-review.json` until it appears rather than ending its
+turn early.) The other Stage 3 reviewers stay as parallel sub-agents; only this one is
+promoted to a direct orchestrator call.
 
 ---
 
@@ -428,6 +481,15 @@ No design doc means SKIPPED, not a finding.
 
 Read every findings file from `$SCRATCH` (each reviewer wrote `$SCRATCH/<source>.json`).
 Consolidation reads disk, not conversation context, so it survives compaction.
+
+**First, account for every reviewer you dispatched.** For each one, a `$SCRATCH/<source>.json`
+must exist. A dispatched reviewer with no file is `failed` — name it in the report as such
+and never let its absence read as a clean zero. (This is exactly how the ce-code-review
+escalation failed silently before it was promoted to a direct orchestrator call.) A CLI
+reviewer whose file reports `ok` with empty findings but whose own note says it saw no diff
+or no changed files — while the Stage 0b diff is non-empty — is also `failed`/degraded, not
+a clean pass; re-run it or report it degraded. Do not build the verdict until every
+dispatched reviewer is either a real result or a named failure.
 
 Deduplicate by file and line: findings within three lines of each other that describe
 the same problem merge into one, keeping the more specific description and listing every

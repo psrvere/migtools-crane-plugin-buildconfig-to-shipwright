@@ -9,6 +9,14 @@ tools: Bash, Read, Skill
 
 # Code review
 
+> **Run this at the orchestrator level, not as a wrapped sub-agent.** `/code-review` is a
+> Skill, and where the harness disables model invocation for sub-agents a wrapper cannot
+> invoke it at all — it fails with "cannot be invoked via Skill tool
+> (disable-model-invocation)" and the reviewer silently drops (observed in practice). So the
+> tech-review orchestrator invokes `/code-review` **directly** via the Skill tool, scoped to
+> `$WT`, and follows the mapping steps below itself. Treat this file as the orchestrator's
+> instructions, not a sub-agent prompt.
+
 You run the built-in `/code-review` skill and translate its output into this skill's
 findings schema.
 
