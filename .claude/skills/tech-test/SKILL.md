@@ -124,13 +124,21 @@ These override everything below.
    else it converts a real failure into an empty result. An `oc get` against a namespace
    that does not exist returns empty output with exit code 0 — absence of output is not
    absence of the thing.
-5. **Baseline first.** Whenever the input is a BuildConfig, run the **original** on-cluster
-   with `oc start-build` and see it succeed *before* running the converted Build. A run
-   without a passing baseline is reported as `PASS (migrated only — no baseline)` and the
-   stage stays unresolved.
-6. **Equivalence, not just success.** "The BuildRun succeeded" is not a result. Compare the
-   baseline and migrated output image digests and labels, look for the feature's evidence in
-   *both* logs, and emit an explicit `Equivalence: PASS | FAIL | PARTIAL`.
+5. **Baseline first — for output-affecting changes.** When the claim is about the *build
+   output* (a flag, a field mapping, a strategy parameter), run the **original** BuildConfig
+   on-cluster with `oc start-build` and see it succeed *before* the converted Build; a run
+   without a passing baseline is `PASS (migrated only — no baseline)` and stays unresolved.
+   This does **not** apply to a change whose claim is not about output — a `plugin-policy`
+   change like "do not emit a ServiceAccount that overwrites the migrated one" has no
+   meaningful baseline, and forcing one produces a misleading unresolved verdict. For those,
+   the verification is a **state assertion** (below), not a baseline.
+6. **Equivalence, or the criterion the change is actually about.** For output-affecting
+   changes, "the BuildRun succeeded" is not a result: compare baseline and migrated output
+   digests and labels, find the feature's evidence in *both* logs, and emit
+   `Equivalence: PASS | FAIL | PARTIAL`. For a change with no output claim, equivalence does
+   not apply — assert the design's actual criterion instead (e.g. the pre-existing object is
+   unchanged after apply, the named account is preserved and used) and emit that as the
+   verdict. Either way the rule is the same: verify the specific claim, never bare success.
 7. **Strategies come from the Strategy Catalog Repo, from the story's own branch, verbatim.**
    The only permitted edit is `metadata.name`. Never hand-craft one, never `sed` its body,
    never borrow another story's branch, never read one from the Downstream Operator Repo.
@@ -320,10 +328,22 @@ there is no design doc, ask the user for the classification rather than inferrin
 |---|---|
 | `buildah-flag`, `s2i-flag`, `field-mapping` | Strategy validation **and** the conversion pipeline |
 | `crane-conversion`, `crane-cli` | Conversion pipeline |
+| `plugin-policy`, `plugin-gap`, or any class not listed here | Derive the test from the design's **Acceptance Criteria** and **Destination-needs**, not a fixed template — see below |
 | `api-change`, `documentation`, `spike` | **None.** Report that the unit stage is the whole test and stop |
 
 Run **both** templates when the issue changes a strategy *and* the conversion — the strategy
 half proves the parameter exists, the conversion half proves the plugin emits it.
+
+**When the classification is not in the table** (e.g. `plugin-policy` — a change to *what*
+the plugin emits or refuses to emit, rather than a flag or field value), there is no stock
+template. Build the cluster test straight from the design doc's **Acceptance Criteria** and
+**Destination-needs**: each criterion that is cluster-observable becomes one assertion.
+Often the claim is a **state assertion** rather than output equivalence — "the emitted
+resource does not overwrite an object already on the target", "the named ServiceAccount is
+preserved", "the BuildRun runs under the account the BuildConfig named". Drive the real
+plugin binary over stdin (see U6) to get the exact emitted resources, apply them next to a
+representative pre-existing object, and assert the criterion on the live cluster. Baseline
+and equivalence (Hard Rules 5–6) do not apply to these — see the scoping note there.
 
 ## C1 — Cluster gate
 
@@ -399,7 +419,38 @@ spec:
 MANIFEST
 ```
 
-**Shipwright itself** — installing the operator does not deploy it. The CR does:
+**Simpler downstream path (what the Red Hat operators actually want).** On a Red Hat
+OpenShift cluster the two operators install cleanly straight into `openshift-operators`,
+which already carries a global AllNamespaces OperatorGroup — so you do not need the separate
+`openshift-builds` namespace or a hand-rolled OperatorGroup above, and you never hit the
+`OwnNamespace InstallModeType not supported` failure. Both Subscriptions can target
+`openshift-operators`:
+
+```bash
+oc apply -f - <<'MANIFEST'
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-builds-operator
+  namespace: openshift-operators
+spec:
+  channel: latest
+  name: openshift-builds-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+MANIFEST
+```
+
+**Shipwright itself.** Installing the operator does not deploy Shipwright; an enablement CR
+does. The **downstream** OpenShift Builds operator **auto-creates** an `OpenShiftBuild`
+named `cluster` (`operator.openshift.io/v1alpha1`) with `spec.shipwright.build.state:
+Enabled` — so check for it rather than creating anything:
+
+```bash
+oc get openshiftbuild cluster -o jsonpath='{.spec.shipwright.build.state}'   # Enabled
+```
+
+Only on **upstream** Shipwright (no OpenShift Builds operator) do you create the CR yourself:
 
 ```bash
 oc apply -f - <<'MANIFEST'
@@ -511,8 +562,17 @@ converted Build you intend to actually run needs a Git source.
 **ImageStream before BuildConfig.** A BuildConfig whose output is an `ImageStreamTag`
 requires the ImageStream to exist first.
 
-**All BuildRuns use `serviceAccount: pipeline`** — the internal registry needs its push
-credentials.
+**BuildRuns use `serviceAccount: pipeline` by default** — it already carries internal-registry
+push credentials and the buildah SCC. **Exception: when the story is about the ServiceAccount
+itself** (e.g. a `plugin-policy` change to which account the converted Build names), test with
+the *named* account the BuildConfig/emitted template actually references — using `pipeline`
+would test the wrong thing. A non-default build account needs two grants `pipeline` already
+has, or the BuildRun fails at push / at buildah's `SETFCAP`:
+
+```bash
+oc -n "$NS" policy add-role-to-user system:image-builder -z "<sa>"   # push to internal registry
+oc -n "$NS" adm policy add-scc-to-user pipelines-scc     -z "<sa>"   # buildah SETFCAP
+```
 
 ### Template: `buildah-flag` / `s2i-flag`
 
@@ -838,8 +898,8 @@ Earned the hard way. Do not rediscover them.
 | # | Gotcha |
 |---|---|
 | 9 | OpenShift, not Kind. The buildah strategy needs Red Hat pull secrets and `SETFCAP`. |
-| 10 | The Builds OperatorGroup must be AllNamespaces (`spec: {}`). `targetNamespaces` fails the CSV with `OwnNamespace InstallModeType not supported`. |
-| 11 | Installing the Builds operator does not deploy Shipwright. Create the `ShipwrightBuild` CR named `cluster`. |
+| 10 | Prefer subscribing both operators into `openshift-operators` — it already has a global AllNamespaces OperatorGroup, so there is nothing to create and no `OwnNamespace InstallModeType not supported`. If you do use a dedicated namespace, its OperatorGroup must be AllNamespaces (`spec: {}`). |
+| 11 | Installing the Builds operator does not deploy Shipwright. On the **downstream** OpenShift Builds operator an `OpenShiftBuild/cluster` (`operator.openshift.io/v1alpha1`) is auto-created with `shipwright.build.state: Enabled` — check for it, do not create a `ShipwrightBuild`. Only **upstream** Shipwright needs you to create the `ShipwrightBuild/cluster` CR yourself. |
 | 12 | Namespaces are lowercased. Queries against the uppercase name return **empty output with exit code 0** — a silent wrong answer. Confirm with `oc project -q`. |
 | 13 | The operator reconciles the shipped `buildah` and `source-to-image` strategies and reverts edits, sometimes mid-run. Apply under `<name>-BUILD-XXXX` from the start. |
 | 14 | Name cluster objects after the issue. Fixed names collide between concurrent runs and leave unattributable orphans. |
@@ -851,7 +911,7 @@ Earned the hard way. Do not rediscover them.
 | 15 | `FROM scratch` cannot be overridden — it is a reserved keyword. The last `FROM` must be a real image. |
 | 16 | Use `registry.access.redhat.com`, not `registry.redhat.io`, which needs auth. |
 | 17 | `--build-context` values need the `docker-image://` prefix. Without it the override silently does nothing. |
-| 18 | All BuildRuns use `serviceAccount: pipeline` for internal-registry push access. |
+| 18 | BuildRuns use `serviceAccount: pipeline` by default (push creds + buildah SCC). But when the story is *about* the ServiceAccount, test with the named account the emitted Build references and grant it `system:image-builder` + `pipelines-scc`, or it fails at push / `SETFCAP`. |
 | 19 | Fetch logs with `-c step-build-and-push` — build pods have several containers. |
 | 20 | Find pods by matching the BuildRun name. Label selectors are unreliable here. |
 | 21 | `gh gist create -f Dockerfile /tmp/Dockerfile-variant` names the gist file after the source basename. Copy to `/tmp/Dockerfile` first. Delete with `--yes`. |
