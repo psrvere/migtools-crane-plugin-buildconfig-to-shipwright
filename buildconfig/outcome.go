@@ -40,14 +40,33 @@ func outcomeConverted() Outcome            { return Outcome{State: OutcomeConver
 func outcomeSkipped(reason string) Outcome { return Outcome{State: OutcomeSkipped, Reason: reason} }
 func outcomeFailed(reason string) Outcome  { return Outcome{State: OutcomeFailed, Reason: reason} }
 
-// warnf is the one way to record a conversion warning: it appends the message to
-// c.warnings (the single source that drives converted-with-warnings, the
-// ConversionWarningsAnnotation, and Outcome.Warnings) and logs it at WARN. All
-// field-drop and degraded-conversion messages must go through warnf; a message
-// logged directly via c.Log would not be counted and would misclassify the
-// outcome (the one deliberate exception is the name-collision error in
-// uniqueName, which records into c.warnings explicitly alongside a louder ERROR).
+// warnf is the one way to record a conversion warning: it prefixes the message
+// with the BuildConfig it came from, appends it to c.warnings, and logs it at
+// WARN. c.warnings is the single source that drives converted-with-warnings,
+// Outcome.Warnings, and the ConversionWarningsAnnotation that Convert writes.
+//
+// All field-drop and degraded-conversion messages must go through warnf. A
+// message logged directly via c.Log would not be counted, so the BuildConfig
+// would be reported as cleanly converted while the field was silently dropped
+// (BUILD-2319). The one deliberate exception is the name-collision error in
+// uniqueName, which records into c.warnings explicitly alongside a louder ERROR.
 func (c *Converter) warnf(format string, args ...interface{}) {
-	c.warnings = append(c.warnings, fmt.Sprintf(format, args...))
-	c.Log.Warnf(format, args...)
+	c.Log.Warn(c.recordWarning(fmt.Sprintf(format, args...)))
+}
+
+// recordWarning attributes a message to the BuildConfig being converted, appends
+// it to c.warnings, and returns the attributed text for the caller to log.
+//
+// It exists so the two call sites that log a drop at ERROR rather than WARN (the
+// name collision in uniqueName and the inline Dockerfile on a Docker strategy)
+// still get the same attribution as warnf, instead of being the only entries in
+// the annotation with no BuildConfig on them.
+func (c *Converter) recordWarning(msg string) string {
+	// curName is empty only for a warning raised outside Convert; such a message
+	// has no BuildConfig to attribute and is recorded unprefixed.
+	if c.curName != "" {
+		msg = fmt.Sprintf("[%s/%s] %s", c.curNS, c.curName, msg)
+	}
+	c.warnings = append(c.warnings, msg)
+	return msg
 }
