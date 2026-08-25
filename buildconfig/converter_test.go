@@ -1943,7 +1943,7 @@ func TestConvertMetadataLabelsAbsent(t *testing.T) {
 
 func TestConvertMetadataAnnotationsCopied(t *testing.T) {
 	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
-	request := buildConfigRequest("annotated-app", withAnnotations(map[string]interface{}{
+	request := buildConfigRequest("annotated-app", withSpecField("runPolicy", "Parallel"), withAnnotations(map[string]interface{}{
 		"team":                        "builds",
 		"contact":                     "builds@example.com",
 		"app.kubernetes.io/component": "backend",
@@ -1980,7 +1980,7 @@ func TestConvertMetadataAnnotationsCopied(t *testing.T) {
 func TestConvertMetadataAnnotationsFiltersInternal(t *testing.T) {
 	logger, hook := logrustest.NewNullLogger()
 	plugin := &BuildConfigTransformPlugin{Log: logger}
-	request := buildConfigRequest("internal-annotations-app", withAnnotations(map[string]interface{}{
+	request := buildConfigRequest("internal-annotations-app", withSpecField("runPolicy", "Parallel"), withAnnotations(map[string]interface{}{
 		"openshift.io/generated-by":                        "OpenShiftNewApp",
 		"openshift.io/build-config.name":                   "internal-annotations-app",
 		"kubectl.kubernetes.io/last-applied-configuration": "{}",
@@ -2017,7 +2017,7 @@ func TestConvertMetadataAnnotationsAbsent(t *testing.T) {
 	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
 
 	// No annotations at all — converted-from must still be present
-	resp, err := plugin.Run(buildConfigRequest("no-annotations-app"))
+	resp, err := plugin.Run(buildConfigRequest("no-annotations-app", withSpecField("runPolicy", "Parallel")))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2732,7 +2732,7 @@ func TestConvertBuildArgsValueFrom(t *testing.T) {
 			logger, hook := logrustest.NewNullLogger()
 			plugin := &BuildConfigTransformPlugin{Log: logger}
 
-			resp, err := plugin.Run(buildConfigRequest("buildargs-test", withBuildArgs(tt.buildArgs)))
+			resp, err := plugin.Run(buildConfigRequest("buildargs-test", withSpecField("runPolicy", "Parallel"), withBuildArgs(tt.buildArgs)))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -2856,7 +2856,7 @@ func TestConvertBuildArgsWarningsAnnotationBounded(t *testing.T) {
 			logger, hook := logrustest.NewNullLogger()
 			plugin := &BuildConfigTransformPlugin{Log: logger}
 
-			resp, err := plugin.Run(buildConfigRequest("buildargs-test", withBuildArgs(tt.buildArgs)))
+			resp, err := plugin.Run(buildConfigRequest("buildargs-test", withSpecField("runPolicy", "Parallel"), withBuildArgs(tt.buildArgs)))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

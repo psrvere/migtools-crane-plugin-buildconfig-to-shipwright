@@ -49,6 +49,11 @@ const (
 	// generated Build so the outcome is observable in the output, not only in
 	// the logs (BUILD-2318). Set to OutcomeConverted or OutcomeConvertedWithWarnings.
 	ConversionOutcomeAnnotation = "buildconfig-to-shipwright/conversion-outcome"
+	// ConversionReasonAnnotation records why a BuildConfig was skipped or failed,
+	// on the passed-through BuildConfig itself. Without it a BuildConfig the
+	// plugin declined is indistinguishable in the output from one it never saw
+	// (BUILD-2319).
+	ConversionReasonAnnotation = "buildconfig-to-shipwright/conversion-reason"
 
 	ConfigMapsRFE = "https://issues.redhat.com/browse/BUILD-1745"
 	SecretsRFE    = "https://issues.redhat.com/browse/BUILD-1744"
@@ -66,6 +71,11 @@ const (
 type Converter struct {
 	Log  logrus.FieldLogger
 	Opts PluginOptionalFields
+
+	// curNS and curName name the BuildConfig currently being converted. warnf
+	// reads them to attribute every warning, so a run covering hundreds of
+	// BuildConfigs produces a log an operator can actually trace (BUILD-2319).
+	curNS, curName string
 
 	// warnings collects every conversion warning recorded via warnf so a
 	// conversion can be classified as converted-with-warnings and the messages
@@ -108,8 +118,7 @@ func (c *Converter) uniqueName(kind, namespace, original string) string {
 			// loudly — but still record it as a conversion warning so the
 			// outcome reflects it.
 			msg := fmt.Sprintf("Hash-suffixed %s name %q for %q still collides with the name already generated for %q — resources may overwrite each other", kind, name, original, owner)
-			c.Log.Error(msg)
-			c.warnings = append(c.warnings, msg)
+			c.Log.Error(c.recordWarning(msg))
 		}
 	}
 	c.assignedNames[key] = original
@@ -117,6 +126,10 @@ func (c *Converter) uniqueName(kind, namespace, original string) string {
 }
 
 func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructured, Outcome) {
+	c.curNS, c.curName = bc.Namespace, bc.Name
+	// Clear the attribution once this conversion is done so a warning raised
+	// later on a reused Converter is not misattributed to this BuildConfig.
+	defer func() { c.curNS, c.curName = "", "" }()
 	startWarnings := len(c.warnings)
 	b := &shipwrightv1beta1.Build{}
 	b.Name = c.uniqueName("Build", bc.Namespace, bc.Name)
@@ -205,10 +218,14 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	// Classify the outcome now that every field has been processed, and record
 	// it on the Build so the disposition is observable in the output (BUILD-2318).
 	outcome := outcomeConverted()
-	if newWarnings := c.warnings[startWarnings:]; len(newWarnings) > 0 {
+	if len(c.warnings) > startWarnings {
 		outcome.State = OutcomeConvertedWithWarnings
+		// Build the annotation before snapshotting: boundedWarnings records a
+		// warning of its own when it truncates, and snapshotting first would
+		// leave that notice out of the Outcome the caller sees.
+		b.Annotations[ConversionWarningsAnnotation] = c.boundedWarnings(c.warnings[startWarnings:])
 		// Copy so the Outcome does not alias the Converter's growing slice.
-		outcome.Warnings = append([]string(nil), newWarnings...)
+		outcome.Warnings = append([]string(nil), c.warnings[startWarnings:]...)
 	}
 	b.Annotations[ConversionOutcomeAnnotation] = string(outcome.State)
 
@@ -425,11 +442,6 @@ func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwright
 	if len(ds.BuildArgs) > 0 {
 		values := []shipwrightv1beta1.SingleValue{}
 		literal, mapped, skipped := 0, 0, 0
-		// Build-arg warnings go through the shared recorder like every other
-		// warning; baStart lets us slice out just this block's warnings for the
-		// (deliberately buildArgs-scoped) ConversionWarningsAnnotation, while
-		// Outcome.Warnings still carries the full set.
-		baStart := len(c.warnings)
 		for _, arg := range ds.BuildArgs {
 			if !validBuildArgName(arg.Name) {
 				c.warnf("Build arg with invalid name %q was skipped — names must be non-empty and must not contain '=', '$', '{', '}', whitespace, or control characters (BuildConfig %s).", arg.Name, bc.Name)
@@ -487,12 +499,6 @@ func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwright
 				Name:   BuildArgsParamName,
 				Values: values,
 			})
-		}
-		if baWarnings := c.warnings[baStart:]; len(baWarnings) > 0 {
-			if b.Annotations == nil {
-				b.Annotations = map[string]string{}
-			}
-			b.Annotations[ConversionWarningsAnnotation] = c.boundedWarnings(baWarnings)
 		}
 		c.Log.Infof("Processed %d build args: %d literal, %d mapped to ConfigMap/Secret refs, %d skipped for BuildConfig %s", len(ds.BuildArgs), literal, mapped, skipped, bc.Name)
 	}
@@ -794,8 +800,7 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		switch bc.Spec.Strategy.Type {
 		case buildv1.DockerBuildStrategyType:
 			msg := fmt.Sprintf("Inline Dockerfile is not supported in buildah strategy for BuildConfig %s/%s. Consider moving it to a separate file.", bc.Namespace, bc.Name)
-			c.warnings = append(c.warnings, msg)
-			c.Log.Errorf("%s", msg)
+			c.Log.Errorf("%s", c.recordWarning(msg))
 		case buildv1.SourceBuildStrategyType:
 			c.warnf("BuildConfig %s/%s has an inline Dockerfile set on a Source strategy. "+
 				"Inline Dockerfiles are not used by Source-to-Image and were not migrated. "+
@@ -1047,7 +1052,7 @@ func (c *Converter) processNodeSelector(bc *buildv1.BuildConfig, b *shipwrightv1
 	}
 
 	if err := validateNodeSelector(bc.Spec.NodeSelector); err != nil {
-		c.Log.Warnf("nodeSelector on BuildConfig %s/%s is invalid: %v; dropping the whole nodeSelector — migrated builds will not be pinned to any node",
+		c.warnf("nodeSelector on BuildConfig %s/%s is invalid: %v; dropping the whole nodeSelector — migrated builds will not be pinned to any node",
 			bc.Namespace, bc.Name, err)
 		return
 	}

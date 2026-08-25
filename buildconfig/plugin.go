@@ -7,6 +7,7 @@ import (
 	"github.com/konveyor/crane-lib/transform"
 	buildv1 "github.com/openshift/api/build/v1"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 const PluginVersion = "v0.1.0"
@@ -106,10 +107,10 @@ func (p *BuildConfigTransformPlugin) Run(request transform.PluginRequest) (trans
 		// BuildConfig that fails to convert must not return one. Leave it
 		// unchanged and let the rest of the run continue (BUILD-2318).
 		p.log().Errorf("BuildConfig %s/%s failed to convert (%s) — leaving it unchanged so the rest of the migration can continue", bc.Namespace, bc.Name, outcome.Reason)
-		return passThrough, nil
+		return p.passThroughWithDisposition(u, outcome, passThrough), nil
 	case OutcomeSkipped:
 		p.log().Warnf("BuildConfig %s/%s was not converted (%s) — passing through unchanged", bc.Namespace, bc.Name, outcome.Reason)
-		return passThrough, nil
+		return p.passThroughWithDisposition(u, outcome, passThrough), nil
 	case OutcomeConverted, OutcomeConvertedWithWarnings:
 		p.log().Infof("BuildConfig %s/%s conversion outcome: %s", bc.Namespace, bc.Name, outcome.State)
 		return transform.PluginResponse{
@@ -124,6 +125,22 @@ func (p *BuildConfigTransformPlugin) Run(request transform.PluginRequest) (trans
 		p.log().Errorf("BuildConfig %s/%s produced unknown conversion outcome %q — passing through unchanged", bc.Namespace, bc.Name, outcome.State)
 		return passThrough, nil
 	}
+}
+
+// passThroughWithDisposition returns the pass-through response with a patch that
+// records why this BuildConfig was not converted, on the BuildConfig itself.
+//
+// A failure to build the patch is not worth failing the migration over: the
+// BuildConfig still passes through unchanged, which is the behaviour BUILD-2318
+// shipped, and the reason is already in the log. Warn and carry on.
+func (p *BuildConfigTransformPlugin) passThroughWithDisposition(u unstructured.Unstructured, outcome Outcome, passThrough transform.PluginResponse) transform.PluginResponse {
+	patch, err := dispositionPatch(u, outcome)
+	if err != nil {
+		p.log().Warnf("BuildConfig %s/%s: could not record the %s disposition on the passed-through BuildConfig: %v", u.GetNamespace(), u.GetName(), outcome.State, err)
+		return passThrough
+	}
+	passThrough.Patches = patch
+	return passThrough
 }
 
 func (p *BuildConfigTransformPlugin) log() logrus.FieldLogger {

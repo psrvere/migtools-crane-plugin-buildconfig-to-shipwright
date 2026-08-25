@@ -34,12 +34,12 @@ func (c *Converter) processPostCommit(bc *buildv1.BuildConfig) {
 		return
 	}
 
-	c.Log.Warnf(postCommitWarningTemplate, descriptor, bc.Name)
+	c.warnf(postCommitWarningTemplate, descriptor, bc.Name)
 
 	// The BuildConfig API forbids script and command together. Accept the
 	// input rather than fail the migration, but say so.
 	if bc.Spec.PostCommit.Script != "" && len(bc.Spec.PostCommit.Command) > 0 {
-		c.Log.Warnf("BuildConfig '%s' sets both script and command in spec.postCommit, which the BuildConfig "+
+		c.warnf("BuildConfig '%s' sets both script and command in spec.postCommit, which the BuildConfig "+
 			"API does not allow. The script form was assumed for the warning above.", bc.Name)
 	}
 }

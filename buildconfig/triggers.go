@@ -97,7 +97,7 @@ func (c *Converter) preserveOriginalTriggers(bc *buildv1.BuildConfig, b *shipwri
 	}
 	data, err := json.Marshal(sanitized)
 	if err != nil {
-		c.Log.Warnf("BuildConfig %s: could not preserve original triggers in annotation %s: %v", bc.Name, OriginalTriggersAnnotation, err)
+		c.warnf("BuildConfig %s: could not preserve original triggers in annotation %s: %v", bc.Name, OriginalTriggersAnnotation, err)
 		return
 	}
 	if b.Annotations == nil {
@@ -145,29 +145,29 @@ func (c *Converter) processTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta
 		case buildv1.GitHubWebHookBuildTriggerType,
 			buildv1.GitLabWebHookBuildTriggerType,
 			buildv1.BitbucketWebHookBuildTriggerType:
-			c.Log.Warnf(webhookTriggerWarning, bc.Name, t)
+			c.warnf(webhookTriggerWarning, bc.Name, t)
 		case buildv1.GenericWebHookBuildTriggerType:
 			msg := fmt.Sprintf(webhookTriggerWarning, bc.Name, t)
 			if trigger.GenericWebHook != nil && trigger.GenericWebHook.AllowEnv {
 				msg += " Note: webhook-injected environment variables (allowEnv) have no equivalent in Shipwright."
 			}
-			c.Log.Warn(msg)
+			c.warnf("%s", msg)
 		case buildv1.ImageChangeBuildTriggerType:
-			c.Log.Warnf("BuildConfig %s: ImageChange trigger is dropped — builds will no longer start when %s changes. Shipwright has no equivalent of image change triggers today.",
+			c.warnf("BuildConfig %s: ImageChange trigger is dropped — builds will no longer start when %s changes. Shipwright has no equivalent of image change triggers today.",
 				bc.Name, imageChangeWatchedRef(bc, trigger.ImageChange))
 		case buildv1.ConfigChangeBuildTriggerType:
 			// Checked at runtime rather than assumed, so there is no hard
 			// dependency on the BuildRun template (BUILD-2261): when the
 			// annotation is absent the warning falls back to manual wording.
 			if b != nil && b.Annotations[BuildRunTemplateAnnotation] != "" {
-				c.Log.Warnf("BuildConfig %s: ConfigChange trigger is dropped — the automatic first build will not happen. The generated Build carries a BuildRun template (annotation %s); apply it once after review to start the first build.",
+				c.warnf("BuildConfig %s: ConfigChange trigger is dropped — the automatic first build will not happen. The generated Build carries a BuildRun template (annotation %s); apply it once after review to start the first build.",
 					bc.Name, BuildRunTemplateAnnotation)
 			} else {
-				c.Log.Warnf("BuildConfig %s: ConfigChange trigger is dropped — the automatic first build will not happen; create a BuildRun manually once to start the first build.",
+				c.warnf("BuildConfig %s: ConfigChange trigger is dropped — the automatic first build will not happen; create a BuildRun manually once to start the first build.",
 					bc.Name)
 			}
 		default:
-			c.Log.Warnf("BuildConfig %s: unsupported trigger type %q is dropped during migration.", bc.Name, trigger.Type)
+			c.warnf("BuildConfig %s: unsupported trigger type %q is dropped during migration.", bc.Name, trigger.Type)
 		}
 	}
 
@@ -176,7 +176,7 @@ func (c *Converter) processTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta
 		types = append(types, t)
 	}
 	sort.Strings(types)
-	c.Log.Warnf("Found %d trigger(s) (%s) on BuildConfig %s — none work in Shipwright today; builds must be started manually or by your own automation.",
+	c.warnf("Found %d trigger(s) (%s) on BuildConfig %s — none work in Shipwright today; builds must be started manually or by your own automation.",
 		len(bc.Spec.Triggers), strings.Join(types, ", "), bc.Name)
 }
 
