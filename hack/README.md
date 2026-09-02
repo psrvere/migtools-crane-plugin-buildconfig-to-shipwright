@@ -4,13 +4,13 @@ This directory contains scripts for setting up development and E2E testing envir
 
 ## Prerequisites
 
-- **[crane CLI](https://github.com/konveyor/crane)** - Required for transform and apply operations
+- **[crane CLI](https://github.com/migtools/crane)** - Required for transform and apply operations
   
   **Installation:**
   
   ```bash
   # Build from source
-  git clone https://github.com/konveyor/crane.git
+  git clone https://github.com/migtools/crane.git
   cd crane
   go build -o crane .
   sudo mv crane /usr/local/bin/
@@ -239,4 +239,4 @@ export SHIPWRIGHT_VERSION=v0.20.11
 
 - [Shipwright Build Documentation](https://shipwright.io/docs/)
 - [Tekton Documentation](https://tekton.dev/docs/)
-- [crane CLI](https://github.com/konveyor/crane)
+- [crane CLI](https://github.com/migtools/crane)
