@@ -177,7 +177,7 @@ if [ -n "$DOCKER_BUILD" ]; then
         "  volume name preserved"
     check 'vol_block "$DOCKER_BUILD" | grep -q "secretName: build-certs"' \
         "  Secret volume source preserved"
-    check '! grep -q "/etc/pki/ca-trust/source/anchors" "$DOCKER_BUILD"' \
+    check '! vol_block "$DOCKER_BUILD" | grep -q "/etc/pki/ca-trust/source/anchors"' \
         "  mount destinationPath not migrated (strategy owns mount paths)"
 
     # Registry lists are trimmed and blank entries dropped before they reach
@@ -210,7 +210,7 @@ if [ -n "$S2I_BUILD" ]; then
         "  volume name preserved"
     check 'vol_block "$S2I_BUILD" | grep -q "configMap:"' \
         "  ConfigMap volume source preserved"
-    check '! grep -q "/etc/app-config" "$S2I_BUILD"' \
+    check '! vol_block "$S2I_BUILD" | grep -q "/etc/app-config"' \
         "  mount destinationPath not migrated (strategy owns mount paths)"
 else
     fail "S2I → Shipwright Build not found in output"

@@ -1,83 +1,63 @@
 # crane-plugin-buildconfig-to-shipwright
 
-A [crane](https://github.com/konveyor/crane) transform plugin that converts OpenShift `BuildConfig` resources (`build.openshift.io/v1`) to [Shipwright](https://shipwright.io/) `Build` CRs (`shipwright.io/v1beta1`).
+A [crane](https://github.com/migtools/crane) transform plugin that converts OpenShift
+`BuildConfig` resources (`build.openshift.io/v1`) into Shipwright `Build` resources
+(`shipwright.io/v1beta1`). It runs offline, as part of `crane transform`, and never talks to
+a cluster.
 
 ## What it does
 
-During crane's transform phase, this plugin:
+For every resource in a crane export:
 
-1. Detects `BuildConfig` resources in the exported namespace
-2. Whiteouts the BuildConfig it converts (marks it for deletion). A skipped or failed BuildConfig passes through unchanged
-3. Generates a corresponding Shipwright `Build` resource
-4. Generates a `ServiceAccount` named after the BuildConfig when a pull secret is referenced and the BuildConfig names no ServiceAccount; a named ServiceAccount is migrated by crane unchanged, and the plugin warns with the `oc secrets link` command that attaches the pull secret on the target
+- Anything that is not a BuildConfig passes through untouched.
+- A BuildConfig with a Docker or Source strategy and an output image becomes a Shipwright
+  `Build`. The original is removed from the output. When the BuildConfig has a pull secret
+  and names no ServiceAccount, the plugin also generates a `ServiceAccount` carrying it. An
+  inline Dockerfile is preserved in a `ConfigMap`.
+- A BuildConfig with a Custom or JenkinsPipeline strategy, or no output image, is skipped:
+  it stays in the output unchanged with two annotations saying it was skipped and why. A
+  BuildConfig the plugin cannot convert is treated the same way, marked failed. Neither stops
+  the migration.
 
-All other resource types are passed through unchanged.
+Every field the plugin drops or changes produces a warning, in the log and in an annotation
+on the Build. The full list, field by field, is in [docs/support-matrix.md](docs/support-matrix.md).
 
-## Strategy support
-
-| BuildConfig Strategy | Shipwright ClusterBuildStrategy | Status |
-|---------------------|-------------------------------|--------|
-| Docker | `buildah` | Supported |
-| Source (S2I) | `source-to-image` | Supported |
-| Custom | — | Skipped, passed through unchanged (no equivalent) |
-| JenkinsPipeline | — | Skipped, passed through unchanged (migrate to Tekton) |
-
-Every BuildConfig field, what happens to it, and every warning the plugin can emit are listed
-in [docs/support-matrix.md](docs/support-matrix.md).
-
-## Plugin flags
-
-| Flag | Format | Purpose |
-|------|--------|---------|
-| `registry-mapping` | `old=new,old2=new2` | Rewrite image registry references |
-| `imagestream-mapping` | `ns/name:tag=registry/image:tag` | Resolve ImageStreamTag/ImageStreamImage references, and bare DockerImage names that relied on `lookupPolicy.local`, to concrete image URLs |
-| `default-build-strategy` | `docker=my-buildah,s2i=my-s2i` | Override default ClusterBuildStrategy names |
-| `search-registries` | `reg1,reg2` | Search registries for Buildah |
-| `insecure-registries` | `reg1,reg2` | Insecure (HTTP/self-signed) registries. Buildah gets the `registries-insecure` param; for a Shipwright-managed push (`source-to-image`) an output image on one of these registries sets `spec.output.insecure=true` |
-| `block-registries` | `reg1,reg2` | Blocked registries for Buildah |
-
-### Redirecting output images
-
-A BuildConfig pushes its output to the internal OpenShift registry
-(`image-registry.openshift-image-registry.svc:5000/<namespace>/<name>`). To send
-converted Builds to a registry the target cluster can reach, use the two mapping
-flags — there is no dedicated `--dest-registry` flag:
-
-- `registry-mapping` rewrites the registry prefix and **preserves the
-  `<namespace>/<name>` path**. Mapping the internal registry to `quay.io/acme`
-  turns an ImageStreamTag output in namespace `myapp` into
-  `quay.io/acme/myapp/webapp:latest` — three path segments.
-- Registries that accept only `<org>/<repo>` (Quay.io, Docker Hub) reject that
-  deeper path. For those, give an exact target per BuildConfig with
-  `imagestream-mapping` (`ns/name:tag=registry/image:tag`), which sets the output
-  reference. `registry-mapping` still runs afterward, so a prefix it matches on
-  the mapped value is rewritten too — keep that in mind when using both flags.
-
-Redirecting an ImageStreamTag output off the internal registry means the source
-ImageStream is no longer updated, so anything watching it to roll out (a
-Deployment or DeploymentConfig) stops firing. The converter warns when this
-happens. The check is a registry-prefix comparison, not a cluster-aware one: it
-fires when the resolved image no longer starts with
-`image-registry.openshift-image-registry.svc:5000/`. A redirect to a different
-in-cluster registry alias is not recognised as internal, and a redirect to a
-different path on the same internal registry is not caught.
+| BuildConfig strategy | Shipwright ClusterBuildStrategy | Outcome |
+|---|---|---|
+| Docker | `buildah` | converted |
+| Source (S2I) | `source-to-image` | converted |
+| Custom | none | skipped, passed through with an annotation |
+| JenkinsPipeline | none | skipped, passed through with an annotation |
 
 ## Prerequisites
 
-This plugin requires the [crane CLI](https://github.com/konveyor/crane) to be installed.
+- **Go 1.26 or newer** to build the plugin.
+- **crane built from commit `d566a18f6640cd79c8568749d6621b40486d0625` or newer.** The
+  released crane (v0.0.5) does not write the resources a plugin generates: it runs this
+  plugin, reports nothing, and produces no Builds. This is the commit CI pins.
+- **A target cluster with Shipwright and Tekton**, and the `buildah` and `source-to-image`
+  ClusterBuildStrategies. Builds for Red Hat OpenShift ships both. Upstream, CI tests
+  against Shipwright v0.20.11.
 
-### Installing crane
+### Install crane
 
 ```bash
-# Build from source
-git clone https://github.com/konveyor/crane.git
+git clone https://github.com/migtools/crane.git
 cd crane
+git checkout d566a18f6640cd79c8568749d6621b40486d0625
 go build -o crane .
 sudo mv crane /usr/local/bin/
-
-# Verify installation
 crane version
 ```
+
+### Build the plugin
+
+```bash
+GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-shipwright .
+mkdir -p plugins && mv crane-plugin-buildconfig-to-shipwright plugins/
+```
+
+crane finds plugins by scanning the directory passed as `--plugin-dir`.
 
 ## Usage with crane
 
@@ -87,202 +67,147 @@ crane version
 crane export -n myapp
 ```
 
-This exports all resources including BuildConfigs, ImageStreams, etc.
-
-### 2. Transform with plugins
-
-```bash
-crane transform BuildConfigPlugin \
-  --plugin-dir ./plugins
-```
-
-The plugin directory should contain the `crane-plugin-buildconfig-to-shipwright` binary. Crane calls it for each resource automatically.
-
-To pass plugin flags, use the `--optional-flags` parameter:
+### 2. Transform
 
 ```bash
 crane transform BuildConfigPlugin \
   --plugin-dir ./plugins \
-  --overwrite \
-  --optional-flags "registry-mapping=image-registry.openshift-image-registry.svc:5000=quay.io/myorg,imagestream-mapping=myns/mybuilder:latest=quay.io/myorg/builder:latest"
+  --optional-flags '{"registry-mapping":"image-registry.openshift-image-registry.svc:5000=quay.io/myorg"}'
 ```
+
+`--optional-flags` takes one JSON object whose keys are the plugin's flags and whose values
+are strings. The flags are listed [below](#plugin-flags); `crane transform optionals
+--plugin-dir ./plugins` prints them with an example each.
 
 ### 3. Review the output
 
-After transform, the output directory contains:
+`crane apply` writes the result under `output/`:
 
 ```
-transform/
-  resources/
-    BuildConfig_build.openshift.io_v1_myapp_myapp-build.yaml  # whiteout
-    Build_shipwright.io_v1beta1_myapp_myapp-build.yaml         # new Shipwright Build
-    ServiceAccount_v1_myapp_myapp-build.yaml                   # if a pull secret is used and no ServiceAccount is named
-  ...
+output/
+  output.yaml                                   # everything, concatenated
+  resources/myapp/
+    Build_shipwright.io_v1beta1_myapp_webapp.yaml
+    ServiceAccount__v1_myapp_webapp.yaml         # when a pull secret is used and no ServiceAccount is named
+    ConfigMap__v1_myapp_webapp-dockerfile.yaml   # when the BuildConfig has an inline Dockerfile
 ```
 
-Review the generated Shipwright Build YAMLs before applying.
+Read each Build's `crane.konveyor.io/conversion-warnings` annotation before applying it.
+To find the BuildConfigs that were not converted, look for the outcome annotation on the
+objects that still say `kind: BuildConfig`:
+
+```bash
+grep -rl 'kind: BuildConfig' output/resources \
+  | xargs grep -H 'buildconfig-to-shipwright/conversion-'
+```
 
 ### 4. Apply to the target cluster
 
 ```bash
 crane apply
+kubectl apply -f output/resources/
 
-kubectl apply -f ./output/resources/
+kubectl wait --for=jsonpath='{.status.registered}'=True \
+  build.shipwright.io/webapp -n myapp --timeout=120s
 ```
 
-### Full example
+Write `build.shipwright.io`, not `build`, in every kubectl command. On OpenShift the short
+name resolves to the OpenShift Build API.
 
-Migrating a namespace with a Dockerfile-based BuildConfig from OpenShift to a Shipwright-enabled cluster:
+Nothing builds on its own. OpenShift triggers do not exist in Shipwright, so create a
+`BuildRun` to start the first build. On OpenShift with the Builds operator, leave the
+BuildRun's `serviceAccount` unset; it runs as the `pipeline` account.
 
-```bash
-# Export from source cluster
-crane export -n myapp
+## Worked examples
 
-# Transform — OpenShift plugin strips OCP-specific resources,
-# BuildConfig plugin converts builds to Shipwright
-crane transform BuildConfigPlugin \
-  --plugin-dir ./plugins \
-  --optional-flags "registry-mapping=image-registry.openshift-image-registry.svc:5000=quay.io/myorg"
+[docs/examples](docs/examples/README.md) holds three BuildConfigs taken through the plugin,
+with the exact input, the flags, the output, every warning, and the steps on the target
+cluster. A test regenerates their output on every CI run, so they cannot drift.
 
-# Review generated Shipwright Builds
-cat ./transform/resources/Build_shipwright.io_v1beta1_myapp_*.yaml
+## Plugin flags
 
-# Apply to target cluster (Shipwright + Tekton must be installed)
-crane apply
+| Flag | Format | What it changes |
+|---|---|---|
+| `registry-mapping` | `old-registry=new-registry,…` | Rewrites the registry prefix of resolved image references. Applies to strategy and source images, and to an output of kind `ImageStreamTag`. An output of kind `DockerImage` is copied as written |
+| `imagestream-mapping` | `ns/name:tag=registry/image:tag,…` | Replaces an ImageStreamTag or ImageStreamImage reference, or a bare DockerImage name that relied on `lookupPolicy.local`, with a concrete image. Digest form: `ns/name@sha256:…=…` |
+| `default-build-strategy` | `docker=name,s2i=name` | Uses a different ClusterBuildStrategy name |
+| `search-registries` | `registry,…` | Buildah search registries |
+| `insecure-registries` | `registry,…` | Docker strategy: the `registries-insecure` param. Source strategy: `spec.output.insecure: true` when the output image is on one of them, because Shipwright does the push there |
+| `block-registries` | `registry,…` | Buildah blocked registries |
 
-kubectl apply -f ./output/resources/
-```
+### Redirecting output images
 
-## Conversion example
+A BuildConfig pushes to the internal OpenShift registry. On the target cluster that registry
+may not exist, so the two mapping flags redirect the output. There is no single
+`--dest-registry` flag.
 
-Worked examples with the exact input, flags, and output, each checked by a test on every
-CI run, are under [docs/examples](docs/examples/README.md).
+- `registry-mapping` rewrites the prefix and keeps the `<namespace>/<name>` path. Mapping the
+  internal registry to `quay.io/acme` turns an ImageStreamTag output in namespace `myapp` into
+  `quay.io/acme/myapp/webapp:latest`. Quay accepts nested paths like that and creates the
+  repository on first push. Docker Hub does not; for registries that take only
+  `<org>/<repo>`, name an exact target per BuildConfig with `imagestream-mapping`.
+  `registry-mapping` still runs afterwards on the mapped value.
+- Without either flag, an ImageStreamTag output keeps its internal-registry form,
+  `image-registry.openshift-image-registry.svc:5000/<namespace>/<name>:<tag>`, with a warning.
+  That is right when the target is another OpenShift cluster.
+- Redirecting an output off the internal registry means the source ImageStream no longer
+  updates, so a Deployment or DeploymentConfig that rolled out on it stops firing. The plugin
+  warns when this happens. The check is a registry-prefix comparison, not a cluster-aware one.
 
-**Input — OpenShift BuildConfig:**
+The plugin cannot read the builder ServiceAccount to work out a push credential. Set
+`output.pushSecret` on the BuildConfig, or make sure the BuildRun's ServiceAccount can push
+to the target registry. The plugin warns either way.
 
-```yaml
-apiVersion: build.openshift.io/v1
-kind: BuildConfig
-metadata:
-  name: myapp-build
-  namespace: myapp
-spec:
-  source:
-    type: Git
-    git:
-      uri: https://github.com/example/myapp.git
-      ref: main
-    contextDir: src
-    sourceSecret:
-      name: git-credentials
-  strategy:
-    type: Docker
-    dockerStrategy:
-      dockerfilePath: Dockerfile.prod
-      buildArgs:
-        - name: GO_VERSION
-          value: "1.21"
-  output:
-    to:
-      kind: DockerImage
-      name: quay.io/example/myapp:latest
-    pushSecret:
-      name: quay-push-secret
-```
+## Documentation
 
-**Output — Shipwright Build:**
-
-```yaml
-apiVersion: shipwright.io/v1beta1
-kind: Build
-metadata:
-  name: myapp-build
-  namespace: myapp
-  annotations:
-    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/myapp-build
-spec:
-  source:
-    type: Git
-    git:
-      url: https://github.com/example/myapp.git
-      revision: main
-      cloneSecret: git-credentials
-    contextDir: src
-  strategy:
-    name: buildah
-    kind: ClusterBuildStrategy
-  paramValues:
-    - name: dockerfile
-      value: Dockerfile.prod
-    - name: build-args
-      values:
-        - value: "GO_VERSION=1.21"
-  output:
-    image: quay.io/example/myapp:latest
-    pushSecret: quay-push-secret
-```
-
-## Building
-
-```bash
-GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-shipwright .
-```
-
-Requires Go 1.26+ (forced by transitive dependencies).
+| Page | For |
+|---|---|
+| [docs/support-matrix.md](docs/support-matrix.md) | every BuildConfig field: what happens, where it lands, what to do by hand, the warning |
+| [docs/examples](docs/examples/README.md) | three worked examples, verified on a cluster |
+| [docs/volume-migration.md](docs/volume-migration.md) | why a Build with volumes fails with `UndefinedVolume`, and the strategy-copy fix |
+| [docs/architecture.md](docs/architecture.md) | for maintainers and agents: how the plugin runs, the conversion steps, the rules that must stay true |
+| [hack/README.md](hack/README.md) | setting up a Minikube cluster with Shipwright for the cluster tests |
 
 ## Testing
 
-The project uses a three-level testing strategy:
+Three levels.
 
-### 1. Unit Tests
-Standard Go tests at the method level, testing individual functions and transformation logic.
+**Unit tests**, no cluster:
 
 ```bash
 GOTOOLCHAIN=auto go test ./...
 ```
 
-### 2. Plugin E2E Tests
-Tests the plugin binary in isolation (with crane), running sample exported resources through the `crane transform` + `crane apply` pipeline and asserting the output manifests.
+These include the tests that keep the documentation honest: the support matrix must list
+every warning the code can emit, the architecture page must name every file and step, the
+examples must match the plugin's output, and this README's flag examples and version numbers
+must match the code and CI.
+
+**Plugin E2E**, the binary driven by crane over sample exports, no cluster. Needs the pinned
+crane first on `PATH`:
 
 ```bash
 ./tests/e2e-transform.sh
 ```
 
-These tests verify the transformation logic works correctly without requiring a live cluster.
-
-### 3. Cluster E2E Tests
-Full end-to-end validation on a live Minikube cluster with Tekton, Shipwright, and
-the fake BuildConfig CRD. It runs a case per source BuildConfig — an S2I build with
-ImageStream builder and output references, and a Docker (Dockerfile) build — through
-the standard `crane transform` + `crane apply` flow, verifies each generated
-Shipwright Build manifest, applies it to the cluster, and runs a BuildRun to confirm
-the image build succeeds.
+**Cluster E2E**, on a Minikube cluster with Tekton and Shipwright. Converts two BuildConfigs
+through crane, diffs each Build against a committed golden file, applies it, and runs a
+BuildRun to completion:
 
 ```bash
-# Requires a cluster from ./hack/setup-minikube-shipwright.sh + ./hack/fake-minikube-buildconfig.sh
-./tests/e2e-cluster.sh
-
-# Verify the generated manifest only, skip the actual build
-./tests/e2e-cluster.sh --skip-build
+./tests/e2e-cluster.sh              # after ./hack/setup-minikube-shipwright.sh and ./hack/fake-minikube-buildconfig.sh
+./tests/e2e-cluster.sh --skip-build # verify the manifests only
 ```
 
-See [`hack/README.md`](hack/README.md) for detailed cluster setup instructions.
-
-## Known limitations
-
-See the [support matrix](docs/support-matrix.md). Rows that lose something come first in every
-section, and its [warning reference](docs/support-matrix.md#warning-reference) quotes every
-warning the plugin can emit.
+Pull requests run the unit tests and the cluster E2E.
 
 ## Issue tracking
 
-This project is tracked primarily in Jira, under the BUILD project. This is different from
-crane, which is tracked primarily in GitHub (Projects and Issues) and uses Jira only for the
-non-upstream tracking that is required internally. If you are picking up or filing work for
-this plugin, use Jira as the source of truth.
+Work on this plugin is tracked in Jira, project BUILD. crane itself is tracked on GitHub.
+File and pick up work in Jira.
 
 ## Related
 
 - [Enhancement proposal](https://github.com/konveyor/enhancements/pull/300)
-- [crane-plugin-openshift](https://github.com/migtools/crane-plugin-openshift) — reference crane transform plugin
+- [crane-plugin-openshift](https://github.com/migtools/crane-plugin-openshift), the reference crane transform plugin
 - [Shipwright documentation](https://shipwright.io/docs/)
