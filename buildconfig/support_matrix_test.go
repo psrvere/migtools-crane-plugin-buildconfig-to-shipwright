@@ -24,12 +24,14 @@ const supportMatrixPath = "../docs/support-matrix.md"
 //     doc.
 //
 // A template is the format string handed to warnf or recordWarning, the
-// literal reason handed to outcomeFailed or outcomeSkipped, a string assigned
-// to a variable named msg or warning, or a Sprintf inside resolveImageRef
-// (whose result callers pass through warnf("%s", warning)). Format verbs are
-// replaced by an ellipsis before comparing, which is how the doc quotes them.
-// The test proves completeness, not correctness: a row can quote the right
-// warning and describe the wrong behaviour.
+// Sprintf handed to outcomeFailed or outcomeSkipped, a string assigned to a
+// variable named msg, warning or reason, the format string of every fmt.Errorf
+// in the package (their text reaches outcomeFailed through err.Error(), or is
+// embedded in a warning), and the Sprintf inside resolveImageRef and
+// omittedWarningsNotice. Format verbs are replaced by an ellipsis before
+// comparing, which is how the doc quotes them. The test proves completeness,
+// not correctness: a row can quote the right warning and describe the wrong
+// behaviour.
 func TestSupportMatrixCoversEveryWarning(t *testing.T) {
 	doc := readSupportMatrix(t)
 	src := parseNonTestFiles(t)
@@ -143,13 +145,14 @@ func normalizeTemplate(s string) string {
 	return formatVerb.ReplaceAllString(s, "…")
 }
 
-func isSprintf(call *ast.CallExpr) bool {
+// isFmtCall reports whether call is fmt.<name>(...).
+func isFmtCall(call *ast.CallExpr, name string) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
-	return ok && pkg.Name == "fmt" && sel.Sel.Name == "Sprintf"
+	return ok && pkg.Name == "fmt" && sel.Sel.Name == name
 }
 
 func collectWarningTemplates(p *parsedPackage) []string {
@@ -168,7 +171,7 @@ func collectWarningTemplates(p *parsedPackage) []string {
 		out = append(out, n)
 	}
 	addSprintfArg := func(e ast.Expr) {
-		if call, ok := e.(*ast.CallExpr); ok && isSprintf(call) && len(call.Args) > 0 {
+		if call, ok := e.(*ast.CallExpr); ok && isFmtCall(call, "Sprintf") && len(call.Args) > 0 {
 			add(call.Args[0])
 		}
 	}
@@ -179,6 +182,9 @@ func collectWarningTemplates(p *parsedPackage) []string {
 			case *ast.CallExpr:
 				switch fn := v.Fun.(type) {
 				case *ast.SelectorExpr:
+					if isFmtCall(v, "Errorf") && len(v.Args) > 0 {
+						add(v.Args[0])
+					}
 					if (fn.Sel.Name == "warnf" || fn.Sel.Name == "recordWarning") && len(v.Args) > 0 {
 						if s, ok := p.stringOf(v.Args[0]); ok && s == "%s" && len(v.Args) > 1 {
 							add(v.Args[1])
@@ -196,18 +202,20 @@ func collectWarningTemplates(p *parsedPackage) []string {
 					return true
 				}
 				lhs, ok := v.Lhs[0].(*ast.Ident)
-				if !ok || (lhs.Name != "msg" && lhs.Name != "warning") {
+				if !ok || (lhs.Name != "msg" && lhs.Name != "warning" && lhs.Name != "reason") {
 					return true
 				}
-				if v.Tok == token.ADD_ASSIGN {
-					add(v.Rhs[0])
+				// A Sprintf contributes its format string; a literal or a
+				// += suffix contributes itself.
+				if call, ok := v.Rhs[0].(*ast.CallExpr); ok && isFmtCall(call, "Sprintf") {
+					addSprintfArg(call)
 				} else {
-					addSprintfArg(v.Rhs[0])
+					add(v.Rhs[0])
 				}
 			case *ast.FuncDecl:
-				if v.Name.Name == "resolveImageRef" {
+				if v.Name.Name == "resolveImageRef" || v.Name.Name == "omittedWarningsNotice" {
 					ast.Inspect(v.Body, func(n ast.Node) bool {
-						if call, ok := n.(*ast.CallExpr); ok && isSprintf(call) {
+						if call, ok := n.(*ast.CallExpr); ok && isFmtCall(call, "Sprintf") {
 							add(call.Args[0])
 						}
 						return true
@@ -221,7 +229,9 @@ func collectWarningTemplates(p *parsedPackage) []string {
 }
 
 // quotedWarnings returns the first backtick-quoted string of every row in
-// the doc's "Warning reference" table, keyed by its W-number.
+// the doc's "Warning reference" table, keyed by its W-number. A row with no
+// quote is an error unless it is a known prose row, so a row that loses its
+// backticks cannot drop out of the check unnoticed.
 func quotedWarnings(t *testing.T, doc string) map[string]string {
 	t.Helper()
 	_, section, found := strings.Cut(doc, "## Warning reference")
@@ -233,10 +243,15 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 	}
 	row := regexp.MustCompile("(?m)^\\| (W\\d+) \\| ([^\n]*)$")
 	quote := regexp.MustCompile("`([^`]+)`")
+	prose := map[string]bool{"W33": true}
 	out := map[string]string{}
 	for _, m := range row.FindAllStringSubmatch(section, -1) {
-		if q := quote.FindStringSubmatch(m[2]); q != nil {
+		q := quote.FindStringSubmatch(m[2])
+		switch {
+		case q != nil:
 			out[m[1]] = q[1]
+		case !prose[m[1]]:
+			t.Errorf("%s row %s quotes no warning and is not a known prose row", supportMatrixPath, m[1])
 		}
 	}
 	if len(out) < 40 {

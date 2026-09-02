@@ -53,14 +53,18 @@ In the quotes, `…` marks a value the plugin fills in, such as a BuildConfig na
 | `spec.strategy.type: JenkinsPipeline` | skipped | Move the pipeline to Tekton Pipelines | W5 |
 | `spec.output.to` missing, or its `name` empty | skipped | Add an output image, or accept that this build has no target and leave it behind | W7 |
 | `spec.strategy.type` empty or unrecognised | failed | Fix the BuildConfig on the source cluster first | W6 |
-| a strategy `from` or image-source `from` whose `kind` is not `ImageStreamTag`, `ImageStreamImage` or `DockerImage`. For a Docker strategy an empty `kind` counts as unrecognised | failed | Set `kind` on the reference | `unknown image reference kind … for …` |
+| a strategy `from` or image-source `from` whose `kind` is not `ImageStreamTag`, `ImageStreamImage` or `DockerImage`. For a Docker strategy an empty `kind` counts as unrecognised | failed | Set `kind` on the reference | `unknown image reference kind … for …`, wrapped as `error resolving Docker strategy From field: …`, `error resolving Source strategy From field: …` or `failed to resolve image source (BuildConfig …): …` depending on which reference failed |
 | more than one of `source.git`, `source.binary`, `source.images` set | failed | Split into one BuildConfig per source | `multiple source types are not supported in a single build in Shipwright (BuildConfig …)` |
 | `source.binary` without `asFile` (an extracted archive) | failed | Shipwright's local source takes a directory upload, not an archive. Switch to a git or single-file source | `binary archive source (extracted archive) is not supported in Shipwright, only single-file binary sources (asFile) (BuildConfig …)` |
 | more than one entry in `source.images` | failed | One image source per Build. Split the BuildConfig | `multiple image sources are not supported in Shipwright (BuildConfig …)` |
-| the Build, ServiceAccount, ConfigMap or BuildRun template cannot be serialised | failed | Report it. This should not happen on a valid export | `error converting Build to unstructured: …`, `error converting ServiceAccount to unstructured: …`, `error converting inline-Dockerfile ConfigMap to unstructured: …`, or an `error marshaling BuildRun … for BuildConfig …: …` |
+| the Build, ServiceAccount, ConfigMap or BuildRun template cannot be serialised | failed | Report it. This should not happen on a valid export | `error converting Build to unstructured: …`, `error converting ServiceAccount to unstructured: …`, `error converting inline-Dockerfile ConfigMap to unstructured: …`, `error marshaling BuildRun spec for BuildConfig …: …`, `error unmarshaling BuildRun spec for BuildConfig …: …` or `error marshaling BuildRun template for BuildConfig …: …` |
+| the plugin cannot read its flags or decode the BuildConfig | none. The plugin returns an error and crane aborts the whole transform, not just this BuildConfig | Fix the flag value. A BuildConfig that does not decode should be reported | `error parsing optional fields: …`, `error marshaling BuildConfig to JSON: …` or `error decoding BuildConfig: …` |
 
-A skipped BuildConfig has not been looked at beyond the strategy type and output image. Its
-source, triggers and everything else stay exactly as they were, so nothing else is reported.
+A BuildConfig skipped for its strategy type has not been looked at any further, so nothing else
+is reported for it. One skipped for a missing output image has already had its strategy block
+processed: warnings about the strategy image, build args or volumes may appear in the log for
+it, and a failure in that block (an unresolvable `from`) is reported as failed, not skipped.
+Either way the BuildConfig itself stays exactly as it was.
 
 ## Field by field
 
@@ -69,7 +73,7 @@ source, triggers and everything else stay exactly as they were, so nothing else 
 | Field | What happens | Where it lands | What you do by hand | Warning |
 |---|---|---|---|---|
 | `metadata.name` with characters or length not allowed in a DNS-1123 label (63 chars, lowercase, digits, hyphens) | Converted, with a warning. The name is lowercased, invalid runs become `-`, and an 8-character hash of the original is appended | `metadata.name` of the Build | Update anything that refers to the build by its old name | W1 |
-| two BuildConfigs whose sanitised names collide | Converted, with a warning. The second gets a hash suffix | `metadata.name` | Same as above | W2, and W3 if it still collides |
+| two BuildConfigs whose sanitised names collide, such as `my.app` and `my_app`, which both become `my-app` | Converted, with W1 for each but nothing about the collision. Each BuildConfig is converted on its own, so both Builds get the same name and the later one overwrites the earlier when the output is applied | `metadata.name` | Rename one of them before migrating, or check the output for duplicate Build names | W1 only. W2 and W3 describe this case but cannot fire from the plugin today; see [Warning reference](#warning-reference) |
 | `metadata.labels` starting with `openshift.io/build`, or the deprecated `buildconfig` label | Dropped silently (logged at INFO only) | | Nothing. These describe OpenShift build machinery | none |
 | `metadata.annotations` starting with `openshift.io/` or `kubectl.kubernetes.io/` | Dropped silently (logged at INFO only) | | Nothing | none |
 | `metadata.name`, `metadata.namespace` | Converted | `metadata.name`, `metadata.namespace` | Nothing | none |
@@ -81,7 +85,7 @@ source, triggers and everything else stay exactly as they were, so nothing else 
 |---|---|---|---|---|
 | `strategy.type: Docker` | Converted | `spec.strategy: {kind: ClusterBuildStrategy, name: buildah}`. The name changes with `--default-build-strategy docker=…` | Make sure the `buildah` ClusterBuildStrategy exists on the target | none |
 | `strategy.type: Source` | Converted | `spec.strategy: {kind: ClusterBuildStrategy, name: source-to-image}`. The name changes with `--default-build-strategy s2i=…` | Make sure the `source-to-image` ClusterBuildStrategy exists on the target | none |
-| `strategy.type: Custom`, `JenkinsPipeline`, empty, unknown | Skipped or failed | | See [What stops a BuildConfig from converting](#what-stops-a-buildconfig-from-converting) | W4, W5 |
+| `strategy.type: Custom`, `JenkinsPipeline`, empty, unknown | Skipped or failed | | See [What stops a BuildConfig from converting](#what-stops-a-buildconfig-from-converting) | W4, W5, W6 |
 | `dockerStrategy.pullSecret` or `sourceStrategy.pullSecret`, with `spec.serviceAccount` also set | Dropped. The plugin does not touch a named ServiceAccount | | Link the secret to that ServiceAccount on the target: `oc -n <ns> secrets link <sa> <secret> --for=pull,mount` | W8 |
 | `dockerStrategy.pullSecret` or `sourceStrategy.pullSecret`, no `spec.serviceAccount` | Converted. A new ServiceAccount carrying the secret is generated | a `ServiceAccount` named after the BuildConfig, listed in both `imagePullSecrets` and `secrets`. The BuildRun template, if any, names it | Migrate the secret itself; the plugin only references it | none |
 | `spec.serviceAccount` | Converted, with a warning. The name is carried only into the BuildRun template, if one is generated | `spec.serviceAccount` of the BuildRun template | Recreate the account's secrets, image pull secrets and role bindings on the target | W9 |
@@ -225,7 +229,8 @@ The output image resolves slightly differently; see [Output](#output).
 | `kind: ImageStreamTag` or `ImageStreamImage`, no mapping | `image-registry.openshift-image-registry.svc:5000/<ns>/<name>`, then `--registry-mapping`. Warning W20 if the registry mapping changed nothing |
 | `kind: DockerImage`, name contains `/` | the name, then `--registry-mapping` |
 | `kind: DockerImage`, bare name, with `--imagestream-mapping <ns>/<name>=…` | the mapped image, then `--registry-mapping` |
-| `kind: DockerImage`, bare name, no mapping | the name as written. Warning W11, because a bare name may have relied on an ImageStream with `lookupPolicy.local` |
+| `kind: DockerImage`, bare name, no imagestream mapping, but a `--registry-mapping` prefix matches it | the name after `--registry-mapping`, with no warning |
+| `kind: DockerImage`, bare name, no mapping of either kind | the name as written. Warning W11, because a bare name may have relied on an ImageStream with `lookupPolicy.local` |
 | any other `kind` | the conversion fails |
 
 The `<ns>` in a mapping key is the reference's own namespace, or the BuildConfig's namespace when
@@ -237,11 +242,20 @@ the output image a name without a tag is looked up with `:latest` appended.
 | Flag | Format | What it changes |
 |---|---|---|
 | `--imagestream-mapping` | `ns/name:tag=registry/image:tag,…` | Replaces ImageStream references, and bare DockerImage names, with a concrete image |
-| `--registry-mapping` | `old-registry=new-registry,…` | Rewrites the registry prefix of every resolved image reference. The longest matching prefix wins |
+| `--registry-mapping` | `old-registry=new-registry,…` | Rewrites the registry prefix of every resolved image reference, except an output image whose kind is not `ImageStreamTag`, which is copied as written (see [Output](#output)). The longest matching prefix wins |
 | `--default-build-strategy` | `docker=name,s2i=name` | Uses a different ClusterBuildStrategy name. With a custom name the BuildRun template omits `stepResources` (W49) |
 | `--search-registries` | `registry,…` | `spec.paramValues[registries-search]` |
-| `--insecure-registries` | `registry,…` | Docker strategy: `spec.paramValues[registries-insecure]`. Source strategy: `spec.output.insecure: true` when the output image is on one of them |
+| `--insecure-registries` | `registry,…` | Keyed on the strategy name written to the Build, not on the BuildConfig's strategy type. `source-to-image`: `spec.output.insecure: true` when the output image is on one of them. Any other name, including a `--default-build-strategy` override for S2I: `spec.paramValues[registries-insecure]` |
 | `--block-registries` | `registry,…` | `spec.paramValues[registries-block]` |
+
+These are not top-level flags. Pass them as `name=value` pairs, comma separated, inside crane's
+`--optional-flags`. The warnings quote them with a leading `--`; the names are the same.
+
+```bash
+crane transform BuildConfigPlugin \
+  --plugin-dir ./plugins \
+  --optional-flags "registry-mapping=image-registry.openshift-image-registry.svc:5000=quay.io/myorg,imagestream-mapping=myns/mybuilder:latest=quay.io/myorg/builder:latest"
+```
 
 `crane transform optionals` prints the same list with examples.
 
@@ -267,6 +281,11 @@ Annotations:
 | `buildconfig-to-shipwright/original-triggers` | Build | `spec.triggers` is not empty |
 | `buildconfig-to-shipwright/inline-dockerfile-configmap` | Build | inline Dockerfile on a Docker strategy |
 
+If the outcome annotations cannot be patched onto a passed-through BuildConfig, the plugin logs
+`could not record the … disposition on the passed-through BuildConfig: …` with the cause
+(`marshaling disposition patch: …` or `decoding disposition patch: …`) and passes it through
+without them. This should not happen on a valid export.
+
 Every warning is also written to the plugin log, prefixed with `[namespace/name]` of the
 BuildConfig it came from. The log always has the full text, even when the annotation was cut.
 
@@ -275,7 +294,9 @@ BuildConfig it came from. The log always has the full text, even when the annota
 Verbatim, with `…` where the plugin fills in a value. W4 and W7 share the template
 `… — passing BuildConfig … through unchanged`, and W5 the template
 `… — passing BuildConfig … through unchanged. Consider migrating to Tekton Pipelines directly.`,
-where the first `…` is the reason shown below.
+where the first `…` is the reason shown below. W2 and W3 fire when two resources converted by
+the same converter collide; the plugin builds a new converter for every resource, so neither can
+fire today (see [Metadata](#metadata)).
 
 | # | Text |
 |---|---|
@@ -322,7 +343,7 @@ where the first `…` is the reason shown below.
 | W41 | `Duplicate output imageLabel …: overriding value … with …` |
 | W42 | `completionDeadlineSeconds … on BuildConfig … is not positive; leaving Build timeout unset` |
 | W43 | `completionDeadlineSeconds … on BuildConfig … exceeds the maximum representable timeout of … seconds; leaving Build timeout unset` |
-| W44 | `nodeSelector on BuildConfig …/… is invalid: …; dropping the whole nodeSelector — migrated builds will not be pinned to any node` |
+| W44 | `nodeSelector on BuildConfig …/… is invalid: …; dropping the whole nodeSelector — migrated builds will not be pinned to any node` where the reason is `key … is not a valid label key (…)` or `value … for key … is not a valid label value (…)` |
 | W45 | `BuildConfig … uses runPolicy …, which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag` |
 | W46 | `BuildConfig … uses runPolicy …, which is dropped: OpenShift queued its builds and cancelled superseded ones so that only the latest ran, but Shipwright BuildRuns run concurrently and are never auto-cancelled. Serialize the runs and cancel superseded ones in your CI/CD pipeline if you depend on this` |
 | W47 | `BuildConfig … uses unrecognized runPolicy …, which is dropped: Shipwright has no build scheduling policy and BuildRuns run concurrently` |

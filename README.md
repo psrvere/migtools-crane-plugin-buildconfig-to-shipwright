@@ -19,8 +19,11 @@ All other resource types are passed through unchanged.
 |---------------------|-------------------------------|--------|
 | Docker | `buildah` | Supported |
 | Source (S2I) | `source-to-image` | Supported |
-| Custom | — | Error (no equivalent) |
-| JenkinsPipeline | — | Error (migrate to Tekton) |
+| Custom | — | Skipped, passed through unchanged (no equivalent) |
+| JenkinsPipeline | — | Skipped, passed through unchanged (migrate to Tekton) |
+
+Every BuildConfig field, what happens to it, and every warning the plugin can emit are listed
+in [docs/support-matrix.md](docs/support-matrix.md).
 
 ## Plugin flags
 
@@ -264,11 +267,9 @@ See [`hack/README.md`](hack/README.md) for detailed cluster setup instructions.
 
 ## Known limitations
 
-- **No live cluster access** — ImageStream references must be resolved via `--imagestream-mapping` or `--registry-mapping` flags. Without them, the plugin falls back to the internal OpenShift registry URL with a warning. Bare image names such as `myapp:latest` that relied on ImageStream `lookupPolicy.local` are warned about and can be resolved with the same flag.
-- **Volumes** — BuildConfig volumes are not converted (Shipwright requires BuildStrategy-level support). A warning is emitted.
-- **Inline Dockerfiles** — the buildah strategy cannot consume Dockerfile content (BUILD-1495). The plugin preserves it in a ConfigMap named after the BuildConfig with a `-dockerfile` suffix and points at it from the Build annotation `buildconfig-to-shipwright/inline-dockerfile-configmap` (the annotation is the source of truth for the name); commit it to the repository before running the Build.
-- **Multiple source types** — Shipwright supports one source per Build. BuildConfigs with multiple sources produce an error.
-- **BuildRun not generated** — Only the Build definition is created. Triggering builds is left to the user or CI/CD system.
+See the [support matrix](docs/support-matrix.md). Rows that lose something come first in every
+section, and its [warning reference](docs/support-matrix.md#warning-reference) quotes every
+warning the plugin can emit.
 
 ## Issue tracking
 
