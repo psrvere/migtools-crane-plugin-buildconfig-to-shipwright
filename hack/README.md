@@ -32,7 +32,7 @@ This directory contains scripts for setting up development and E2E testing envir
 # - Cluster named "minikube-shipwright"
 # - Kubectl context "minikube-shipwright"
 # - Tekton Pipelines (required by Shipwright)
-# - Shipwright Build v0.20.11
+# - Shipwright Build v0.19.0
 # - Default ClusterBuildStrategies (buildah, source-to-image, etc.)
 # - Local registry addon
 ```
@@ -75,11 +75,11 @@ Creates a Minikube cluster with Shipwright Build for testing.
 
 **Common Options:**
 - `--cluster-name NAME` - Minikube profile name (default: `minikube-shipwright`)
-- `--k8s-version VERSION` - Kubernetes version (default: `v1.34.10`, required: v1.34+ for Shipwright v0.20.11)
+- `--k8s-version VERSION` - Kubernetes version (default: `v1.34.10`, required: v1.34+ for Shipwright v0.19.0)
 - `--cpus N` - CPU count (default: `4`)
 - `--memory MB` - Memory in MB (default: `8192`)
 - `--driver DRIVER` - Minikube driver (default: auto-detect)
-- `--shipwright-version VER` - Shipwright version (default: `v0.20.11`)
+- `--shipwright-version VER` - Shipwright version (default: `v0.19.0`)
 - `--skip-cluster-create` - Only install Shipwright, don't create cluster
 
 **Examples:**
@@ -231,7 +231,7 @@ export K8S_VERSION=v1.34.10
 export CPUS=6
 export MEMORY=16384
 export TEKTON_VERSION=v1.15.0
-export SHIPWRIGHT_VERSION=v0.20.11
+export SHIPWRIGHT_VERSION=v0.19.0
 ./hack/setup-minikube-shipwright.sh
 ```
 

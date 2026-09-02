@@ -39,13 +39,13 @@ complete list. The full list, field by field, is in [docs/support-matrix.md](doc
 
 ## Prerequisites
 
-- **Go 1.26 or newer** to build the plugin.
+- **Go 1.25.6 or newer** to build the plugin.
 - **crane built from commit `d566a18f6640cd79c8568749d6621b40486d0625` or newer.** The
   released crane (v0.0.5) does not write the resources a plugin generates: it runs this
   plugin, reports nothing, and produces no Builds. This is the commit CI pins.
 - **A target cluster with Shipwright and Tekton**, and the `buildah` and `source-to-image`
   ClusterBuildStrategies. Builds for Red Hat OpenShift ships both. Upstream, CI tests
-  against Shipwright v0.20.11.
+  against Shipwright v0.19.0.
 
 ### Install crane
 
