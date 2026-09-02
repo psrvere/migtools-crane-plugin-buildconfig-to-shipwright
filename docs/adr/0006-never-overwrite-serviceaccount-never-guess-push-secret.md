@@ -26,13 +26,17 @@ different remedy in each warning.
 
 - `generateServiceAccount` names the account through `uniqueName` from the BuildConfig's
   name, never from `spec.serviceAccount`.
-- No state carries across BuildConfigs. The old cache of accounts is gone, because crane
-  runs the plugin once per resource in a fresh process.
+- No state carries from one BuildConfig to the next at runtime. crane execs the plugin once
+  per resource, so each conversion is a fresh process, and the old cache of accounts is
+  gone. Within one process the Converter does keep `assignedNames`, to catch generated
+  names that collide, and `warnings`, sliced per BuildConfig by index; only tests reuse one.
 - A missing push secret always produces at least `converted-with-warnings`.
 
 ## Consequences
 
 - The warning embeds three user-supplied names so it can be pasted. Accepted on purpose.
+  The names come from an export the API server validated as DNS-1123, so the command is
+  shell-safe unless someone edits the export by hand; the code does not quote them.
 - Two separate warnings fire when a named account and a pull secret appear together, one
   per story, kept apart so their tests stay independent.
 - A flag for a default push secret was declined to keep the command line small. Revisit only

@@ -9,7 +9,7 @@ The founding design is the upstream enhancement proposal,
 here refines it or departs from it, and says which.
 
 | # | Decision |
-|---|---|
+|---|----------|
 | [0001](0001-offline-conversion-no-cluster-calls.md) | The plugin works offline and never calls a cluster |
 | [0002](0002-four-state-outcome-model.md) | Four outcomes, and one bad BuildConfig never stops the migration |
 | [0003](0003-warnf-single-recording-path.md) | One way to record a warning, and a size cap on the annotation |
@@ -19,6 +19,7 @@ here refines it or departs from it, and says which.
 | [0007](0007-volumes-fail-closed-original-names.md) | Volumes are converted under their original names and left to fail on the cluster, legibly |
 | [0008](0008-triggers-preserved-not-converted.md) | Triggers are preserved and warned about, never converted |
 
-A test checks that every file here has those parts. Nothing checks that a new decision gets a
+A test checks that every file here has those parts, that the index and the files agree, and
+that no link here points at a file that is missing. Nothing checks that a new decision gets a
 record; that is on the reviewer. When you decide something the code must keep obeying, add the
-next number, and add the rule to the table in [docs/architecture.md](../architecture.md).
+next number, and add the rule to the table in `docs/architecture.md`.

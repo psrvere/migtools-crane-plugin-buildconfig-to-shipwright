@@ -46,4 +46,7 @@ source-to-image, match too.
   source-to-image rather than to the `registries-insecure` parameter. The comment in the
   code says the strategy has no such parameter. It does; the real reason is that the
   strategy's push step does not read the registries file, so the parameter would have no
-  effect on the push.
+  effect on the push. The routing keys on the shipped strategy name and on the output
+  image's registry being in the list. A renamed strategy, through `--default-build-strategy
+  s2i=` or the strategy copy ADR-0007 asks for, falls back to the `registries-insecure`
+  parameter, which that push ignores.
