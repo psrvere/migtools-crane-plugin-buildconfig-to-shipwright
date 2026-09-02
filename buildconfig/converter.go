@@ -1084,7 +1084,7 @@ func (c *Converter) processRunPolicy(bc *buildv1.BuildConfig) {
 // minRetentionLimit and maxRetentionLimit mirror the Shipwright CRD validation
 // on BuildRetention.SucceededLimit and BuildRetention.FailedLimit
 // (+kubebuilder:validation:Minimum=1, +kubebuilder:validation:Maximum=10000 in
-// shipwright-io/build v0.20.11).
+// shipwright-io/build v0.19.0).
 const (
 	minRetentionLimit = 1
 	maxRetentionLimit = 10000
@@ -1305,8 +1305,8 @@ func toUnstructured(obj interface{}) (unstructured.Unstructured, error) {
 //   - empty or null status objects (zero-value Status structs marshal as {})
 //
 // Note: metadata.creationTimestamp needs no handling here. metav1.Time is
-// tagged `omitempty,omitzero` in apimachinery v0.36, so encoding/json on
-// Go >= 1.24 (this module pins go 1.26.0) omits the zero value entirely and
+// tagged `omitempty,omitzero` in apimachinery v0.34, so encoding/json on
+// Go >= 1.24 (this module pins go 1.25.6) omits the zero value entirely and
 // the `creationTimestamp: null` case can never reach this function.
 func stripSerializationNoise(obj map[string]interface{}) {
 	if status, present := obj["status"]; present {

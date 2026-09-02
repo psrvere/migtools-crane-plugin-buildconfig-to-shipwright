@@ -36,7 +36,7 @@ The original `crane convert` resolved ImageStreamTag/ImageStreamImage references
 GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-shipwright .
 ```
 
-Requires Go 1.26+ (forced by transitive dependencies). The pinned crane-lib pseudo-version (`v0.1.6-0.20260807130033-222a325c7cee`) provides the unreleased `NewResources` API — update this when crane-lib publishes a new release.
+Requires Go 1.25.6+ (forced by transitive dependencies, notably `shipwright-io/build v0.19.0`). Newer Shipwright releases (v0.20+) pull in k8s v0.36 and require Go 1.26; this module stays on Shipwright v0.19.0 / k8s v0.34 to remain buildable with the Go 1.25 toolchain. The pinned crane-lib pseudo-version (`v0.1.6-0.20260807130033-222a325c7cee`) provides the unreleased `NewResources` API — update this when crane-lib publishes a new release.
 
 ## Development tools (`hack/`)
 
