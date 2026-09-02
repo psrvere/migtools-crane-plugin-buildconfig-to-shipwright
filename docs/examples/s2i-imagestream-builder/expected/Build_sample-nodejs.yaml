@@ -1,0 +1,39 @@
+apiVersion: shipwright.io/v1beta1
+kind: Build
+metadata:
+  annotations:
+    buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
+    buildconfig-to-shipwright/original-triggers: '[{"type":"ConfigChange"},{"type":"ImageChange","imageChange":{}},{"type":"GitHub","secretReference":{"name":"github-webhook-secret"}}]'
+    crane.konveyor.io/conversion-warnings: |-
+      [my-app/sample-nodejs] Output ImageStreamTag "sample-nodejs:latest" resolved to fallback URL: image-registry.openshift-image-registry.svc:5000/my-app/sample-nodejs:latest
+      [my-app/sample-nodejs] No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.
+      [my-app/sample-nodejs] BuildConfig sample-nodejs uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
+      [my-app/sample-nodejs] BuildConfig sample-nodejs: ConfigChange trigger is dropped — the automatic first build will not happen; create a BuildRun manually once to start the first build.
+      [my-app/sample-nodejs] BuildConfig sample-nodejs: ImageChange trigger is dropped — builds will no longer start when the strategy image nodejs:18-ubi8 changes. Shipwright has no equivalent of image change triggers today.
+      [my-app/sample-nodejs] BuildConfig sample-nodejs: GitHub webhook trigger is dropped — the old OpenShift webhook URL will stop working after migration, and Shipwright provides no replacement URL. Remove or repoint the webhook in your Git provider, then set up Pipelines-as-Code or Tekton Triggers to create BuildRuns on push events.
+      [my-app/sample-nodejs] Found 3 trigger(s) (ConfigChange, GitHub, ImageChange) on BuildConfig sample-nodejs — none work in Shipwright today; builds must be started manually or by your own automation.
+    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/sample-nodejs
+  labels:
+    application: sample-nodejs
+  name: sample-nodejs
+  namespace: my-app
+spec:
+  env:
+  - name: NPM_MIRROR
+    value: https://registry.npmjs.org
+  output:
+    image: image-registry.openshift-image-registry.svc:5000/my-app/sample-nodejs:latest
+  paramValues:
+  - configMapValue: null
+    name: builder-image
+    secretValue: null
+    value: registry.access.redhat.com/ubi9/nodejs-18:latest
+  source:
+    contextDir: source-build
+    git:
+      revision: main
+      url: https://github.com/shipwright-io/sample-nodejs
+    type: Git
+  strategy:
+    kind: ClusterBuildStrategy
+    name: source-to-image

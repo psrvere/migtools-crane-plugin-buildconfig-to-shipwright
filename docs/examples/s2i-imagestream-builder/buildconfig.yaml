@@ -1,0 +1,40 @@
+# A Source-to-Image BuildConfig for a Node.js app. The builder image comes
+# from the "openshift" namespace's nodejs ImageStream, which does not exist on
+# the target cluster, so the imagestream-mapping flag names the real image.
+# The output stays on the target cluster's internal registry.
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: sample-nodejs
+  namespace: my-app
+  labels:
+    application: sample-nodejs
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: sample-nodejs:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/shipwright-io/sample-nodejs
+      ref: main
+    contextDir: source-build
+  strategy:
+    type: Source
+    sourceStrategy:
+      from:
+        kind: ImageStreamTag
+        name: nodejs:18-ubi8
+        namespace: openshift
+      env:
+        - name: NPM_MIRROR
+          value: https://registry.npmjs.org
+  triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChange: {}
+    - type: GitHub
+      github:
+        secretReference:
+          name: github-webhook-secret
