@@ -16,7 +16,7 @@
 #   --cpus N               CPU count (default: 4)
 #   --memory MB            Memory in MB (default: 8192)
 #   --driver DRIVER        Minikube driver (default: auto-detect)
-#   --shipwright-version   Shipwright version (default: v0.20.11)
+#   --shipwright-version   Shipwright version (default: v0.19.0)
 #   --skip-cluster-create  Skip cluster creation, only install Shipwright
 #   --help                 Show this help
 #
@@ -27,7 +27,7 @@ K8S_VERSION="${K8S_VERSION:-v1.34.10}"
 CPUS="${CPUS:-4}"
 MEMORY="${MEMORY:-8192}"
 DRIVER="${DRIVER:-}"
-SHIPWRIGHT_VERSION="${SHIPWRIGHT_VERSION:-v0.20.11}"
+SHIPWRIGHT_VERSION="${SHIPWRIGHT_VERSION:-v0.19.0}"
 SKIP_CLUSTER_CREATE="${SKIP_CLUSTER_CREATE:-false}"
 
 log() { echo "==> $*"; }
