@@ -1,0 +1,57 @@
+# A Docker-strategy BuildConfig that uses five things Shipwright cannot hold
+# as they are: a pull secret with no ServiceAccount, a Secret strategy volume,
+# resource requests, a post-commit test hook, and an inline Dockerfile. It
+# still converts, and the plugin generates three resources for it. The
+# README walks through what each one asks of you.
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: webapp
+  namespace: shop
+  labels:
+    app: webapp
+spec:
+  strategy:
+    type: Docker
+    dockerStrategy:
+      # Credential for pulling the base image named in the Dockerfile.
+      pullSecret:
+        name: registry-pull
+      # A private npm config mounted into the build.
+      volumes:
+        - name: npmrc
+          source:
+            type: Secret
+            secret:
+              secretName: npmrc
+          mounts:
+            - destinationPath: /root/.npmrc
+  source:
+    type: Git
+    git:
+      uri: https://github.com/shipwright-io/sample-nodejs
+      ref: main
+    contextDir: docker-build
+    # Overrides the Dockerfile in the repository.
+    dockerfile: |
+      FROM ghcr.io/shipwright-io/shipwright-samples/node:12
+      COPY . /app
+      WORKDIR /app
+      RUN npm install
+      EXPOSE 8080
+      CMD ["npm", "start"]
+  output:
+    to:
+      kind: ImageStreamTag
+      name: webapp:latest
+    pushSecret:
+      name: quay-push
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  postCommit:
+    script: npm test

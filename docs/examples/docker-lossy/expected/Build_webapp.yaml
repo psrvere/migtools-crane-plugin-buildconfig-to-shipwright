@@ -1,0 +1,56 @@
+apiVersion: shipwright.io/v1beta1
+kind: Build
+metadata:
+  annotations:
+    buildconfig-to-shipwright/buildrun-template: |
+      apiVersion: shipwright.io/v1beta1
+      kind: BuildRun
+      metadata:
+        name: webapp-buildrun
+        namespace: shop
+      spec:
+        build:
+          name: webapp
+        serviceAccount: webapp
+        stepResources:
+        - name: build-and-push
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+    buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
+    buildconfig-to-shipwright/inline-dockerfile-configmap: webapp-dockerfile
+    crane.konveyor.io/conversion-warnings: |-
+      [shop/webapp] Volume "npmrc" was converted, but the Build will fail validation (reason: UndefinedVolume) until you: (1) add an overridable volume named 'npmrc' to your ClusterBuildStrategy copy — volumes: [{name: npmrc, overridable: true, emptyDir: {}}] (placeholder source; the converted Build's override supplies the real Secret/ConfigMap), (2) add a volumeMount for 'npmrc' on the strategy build step (original BuildConfig destination paths: /root/.npmrc), (3) point the Build at the strategy copy via spec.strategy.name. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
+      [shop/webapp] Volumes were converted to Build spec volumes, but the shipped Buildah ClusterBuildStrategy does not declare them: Shipwright will reject the Build (Registered=False, reason: UndefinedVolume) until a matching volume with 'overridable: true' is added to a copy of the strategy. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
+      [shop/webapp] Inline Dockerfile on BuildConfig shop/webapp cannot be consumed by the buildah strategy; its content was preserved in ConfigMap shop/webapp-dockerfile (key Dockerfile). Commit it to the source repository as the Dockerfile, or see https://issues.redhat.com/browse/BUILD-1495, before running the Build.
+      [shop/webapp] Output ImageStreamTag "webapp:latest" resolved to fallback URL: quay.io/myorg/shop/webapp:latest
+      [shop/webapp] Output image for ImageStreamTag "shop/webapp:latest" was redirected off the internal registry to "quay.io/myorg/shop/webapp:latest"; the ImageStream will no longer be updated, so any Deployment or DeploymentConfig watching it to roll out will stop firing.
+      [shop/webapp] BuildConfig webapp uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
+      [shop/webapp] PostCommit hook (script) has no Shipwright equivalent and was dropped from BuildConfig 'webapp'. In OpenShift this ran inside the built image before the push, and a failure failed the build. To replicate, add a test step after the BuildRun in a Tekton Pipeline — note this runs after the image is pushed, so it can no longer block a bad image from reaching the registry.
+      [shop/webapp] Resource requirements are not supported on Shipwright Build. Apply the BuildRun template from annotation buildconfig-to-shipwright/buildrun-template (after review) or set stepResources on each BuildRun you create.
+    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/webapp
+  labels:
+    app: webapp
+  name: webapp
+  namespace: shop
+spec:
+  output:
+    image: quay.io/myorg/shop/webapp:latest
+    pushSecret: quay-push
+  source:
+    contextDir: docker-build
+    git:
+      revision: main
+      url: https://github.com/shipwright-io/sample-nodejs
+    type: Git
+  strategy:
+    kind: ClusterBuildStrategy
+    name: buildah
+  volumes:
+  - name: npmrc
+    secret:
+      secretName: npmrc

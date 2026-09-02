@@ -1,0 +1,15 @@
+apiVersion: v1
+data:
+  Dockerfile: |
+    FROM ghcr.io/shipwright-io/shipwright-samples/node:12
+    COPY . /app
+    WORKDIR /app
+    RUN npm install
+    EXPOSE 8080
+    CMD ["npm", "start"]
+kind: ConfigMap
+metadata:
+  annotations:
+    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/webapp
+  name: webapp-dockerfile
+  namespace: shop

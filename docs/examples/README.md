@@ -7,6 +7,7 @@ the output the plugin produced, and what you do afterwards.
 |---|---|
 | [docker-external-registry](docker-external-registry/) | A Docker build whose image now goes to an external registry instead of an ImageStream. Registry mapping, push secret, dropped trigger and run policy |
 | [s2i-imagestream-builder](s2i-imagestream-builder/) | A Source-to-Image build whose builder image lived in an ImageStream. ImageStream mapping, output on the internal registry, three dropped triggers including a webhook |
+| [docker-lossy](docker-lossy/) | A Docker build with a pull secret, a Secret volume, resources, a post-commit hook, and an inline Dockerfile. Three generated resources, the BuildRun template, and what each warning asks of you |
 
 Every folder has the same shape:
 

@@ -65,7 +65,11 @@ register until you provide a strategy copy that does.
    volumeMounts:
      - name: my-npm-secret
        mountPath: /etc/npm
+       readOnly: true
    ```
+
+   `readOnly: true` is required: Shipwright refuses to generate the BuildRun's
+   TaskRun otherwise (`volume mount "my-npm-secret" must be read only`).
 
 4. **Expose the mount to the Dockerfile's `RUN` steps.** The step
    `volumeMount` from step 3 only makes the files visible to the `buildah`
