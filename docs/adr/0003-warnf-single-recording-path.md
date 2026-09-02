@@ -33,9 +33,10 @@ were left out. The log always has the full list.
 - The rule was convention plus a grep at review until the test landed. One direct log call
   reopens the exact defect, so the test exists. An open PR that predates this record
   records its warnings with `c.Log.Warnf` and has to be ported before it lands.
-- The support matrix test fails when a warning template appears in the code with no row in
-  the matrix. It does not catch a direct log call; the zero-count test does.
+- The support matrix test, `TestSupportMatrixCoversEveryWarning` in PR #65, fails when a
+  warning template appears in the code with no row in the matrix. It does not catch a direct
+  log call; the zero-count test does.
 - The 32 KiB cap is a deliberate fraction of the ceiling, leaving room for the BuildRun
   template and the preserved triggers on the same object.
 - Warnings are prose with no stable IDs, so tooling that wants to count categories has to
-  match strings. The matrix keeps the strings stable by test.
+  match strings. The matrix keeps the strings stable by test (PR #65).
