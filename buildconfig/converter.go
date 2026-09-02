@@ -747,6 +747,14 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	binary := bc.Spec.Source.Binary
 	images := bc.Spec.Source.Images
 
+	// bc.Spec.Revision is deliberately not read here. BuildConfig and Build share
+	// CommonSpec, so the field exists on a BuildConfig, but OpenShift only populates
+	// it on the Build objects it instantiates: it is runtime state (the commit hash,
+	// author, committer and message of one run), so on the template we read it is
+	// empty. Shipwright reports the equivalent per run at
+	// BuildRun.status.source.git.{commitSha,commitAuthor,branchName}. The git ref a
+	// user configures is Source.Git.Ref, which we do migrate, below (BUILD-2266).
+
 	// sourceSecret only authenticates git clones (ssh-privatekey / basic-auth). On a
 	// binary, image, or source-less BuildConfig it was inert on OpenShift too, so there
 	// is nothing to map — warn once, attributed to the BuildConfig, and drop it. This
