@@ -2,7 +2,7 @@
 
 ## What is this
 
-A [crane](https://github.com/konveyor/crane) transform plugin that converts OpenShift `BuildConfig` resources (`build.openshift.io/v1`) to Shipwright `Build` CRs (`shipwright.io/v1beta1`). It runs as a standalone binary communicating over stdin/stdout JSON, following the crane plugin protocol.
+A [crane](https://github.com/migtools/crane) transform plugin that converts OpenShift `BuildConfig` resources (`build.openshift.io/v1`) to Shipwright `Build` CRs (`shipwright.io/v1beta1`). It runs as a standalone binary communicating over stdin/stdout JSON, following the crane plugin protocol.
 
 ## Enhancement proposal
 
@@ -24,6 +24,10 @@ The plugin fits into crane's multi-stage transform pipeline. For each resource i
 4. Docker strategy maps to `buildah` ClusterBuildStrategy, Source (S2I) strategy maps to `source-to-image`.
 
 The full picture, step by step, is in [`docs/architecture.md`](docs/architecture.md). What happens to every BuildConfig field is in [`docs/support-matrix.md`](docs/support-matrix.md).
+
+> The `docs/` pages linked from this file (`architecture.md`, `support-matrix.md`, `adr/`,
+> `examples/`) land in PRs #64, #65, #66 to #68 and #70. Until those merge, the links here
+> point at files that do not exist yet.
 
 ## ImageStream resolution
 
@@ -94,34 +98,57 @@ steps table in the architecture page if the pipeline order changed, and add a re
 
 ## Files you may own fully
 
-`main.go`, `hack/*`, `tests/testdata/*`, `buildconfig/*_test.go`, `names.go`,
-`postcommit.go`, and the steps that write nothing or drop wholesale: `processNodeSelector`,
-`processCompletionDeadline`, `processBuildsHistoryLimits`, `processRunPolicy`,
-`processResources`, `processStrategyVolumes`. Propose and ship; the maintainer reads the
-result, not the diff.
+`main.go`, `tests/testdata/export/*`, `buildconfig/names.go`, `buildconfig/postcommit.go`,
+and `processRunPolicy`, the one conversion step that writes nothing to the Build. Propose
+and ship; the maintainer reads the result, not the diff.
+
+Nothing else. In particular this list does not cover `hack/*` or `buildconfig/*_test.go`,
+because CI executes both: `.github/workflows/test-e2e-minikube-pr.yml` runs the `hack/`
+setup scripts, and `.github/workflows/go.yml` runs `go test ./...`, which compiles every
+test file. Code that runs on the CI runner is read line by line.
 
 ## Files where the maintainer reads your diff line by line
 
+**Everything not named in the list above.** That is the default, so a file in neither list
+is read line by line rather than left undecided. The ones worth calling out:
+
 `plugin.go`, `disposition.go`, `outcome.go`, `imagestream.go`, `triggers.go`,
-`dockerfile.go`, and these parts of `converter.go`: the strategy switch and both handlers,
-the output gate, `processOutput`, `processSource`, `uniqueName`, the outcome block, and
-serialization. Also `tests/e2e-*.sh`, the golden files under `tests/testdata/e2e-*/`, and
-`.github/workflows/*`. On these: explain your reasoning before merge, name the rule you
-relied on, and do not reword a warning without saying which matrix row moves.
+`dockerfile.go`, and all of `converter.go`, including the strategy switch and both
+handlers, the output gate, `processOutput`, `processSource`, `uniqueName`, the outcome
+block, serialization, and every remaining `process*` step. Five of those steps write to
+the generated Build and two of the five decide identity or mount Secrets, so none of them
+are low-stakes: `processStrategyVolumes` (writes `b.Spec.Volumes`, and
+`convertBuildVolumeSource` sets `volumeSource.Secret`), `processResources` (writes the
+BuildRun-template annotation, including `spec.serviceAccount`), `processCompletionDeadline`
+(`b.Spec.Timeout`), `processNodeSelector` (`b.Spec.NodeSelector`),
+`processBuildsHistoryLimits` (`b.Spec.Retention`), `processGitProxyConfig` (copies proxy
+URLs, which can embed credentials, into `Build.spec.env`) and `processOutputImageLabels`.
+
+Also `hack/*`, `buildconfig/*_test.go`, `tests/e2e-*.sh`, the golden files under
+`tests/testdata/e2e-*/`, `.github/workflows/*`, `go.mod` and `go.sum`, this file, and
+`.claude/skills/**`. The last two decide what an agent is allowed to do and what a review
+looks for, so widening your own grant is never a change you land unreviewed. Where the two
+lists could both match a path, the line-by-line list wins.
+
+On all of these: explain your reasoning before merge, name the rule you relied on, and do
+not reword a warning without saying which matrix row moves.
 
 ## When a documentation test fails
 
 These tests guard the docs. A red one means a doc to update, not a test to weaken.
+
+Six of the eight land with the sibling documentation PRs (#64, #65, #66 to #68, #70) and do
+not exist on `main` yet. They are listed here so the table is complete when those merge.
 
 | Test | Guards | Fix |
 |---|---|---|
 | `TestSupportMatrixCoversEveryWarning` | every warning template has a row in the matrix, and every quoted warning still exists | add or reword the row in `docs/support-matrix.md` |
 | `TestArchitectureDocNamesEveryFileAndStage` | every non-test Go file and every `process*` method is named in the architecture page | add the line |
 | `TestInvariantsCiteRealTests` | every test the architecture page cites exists | rename it in the page, or restore the test |
-| `TestExamplesMatchCommittedOutput` | each `docs/examples/*/expected/` matches the plugin's output | `go test ./buildconfig -run TestExamplesMatchCommittedOutput -update`, then re-read that example's README |
+| `TestExamplesMatchCommittedOutput` | each `docs/examples/*/expected/` matches the plugin's output | `go test ./buildconfig -run TestExamplesMatchCommittedOutput -update` (once #66 to #68 land; the flag does not exist before that), then re-read that example's README. A regenerated expectation is a changed assertion, so it is read line by line like any other golden file |
 | `TestReadmeOptionalFlagsAreValidJSON`, `TestReadmeVersionsMatchPins` | README flag examples are JSON; README versions match `go.mod`, the Minikube script, and the CI crane pin | fix the README |
 | `TestADRsAreWellFormed` | every record has its parts and is in the index | fix the record |
-| `TestNoDirectWarnLoggingInConverter` | no `c.Log.Warn*` in a Converter method | record the drop through `c.warnf` (ADR-0003) |
+| `TestNoDirectWarnLoggingInConverter` | no `c.Log.Warn*` in a Converter method other than `warnf`, which is the single recording path | record the drop through `c.warnf` (ADR-0003) |
 
 ## Gotchas
 
@@ -131,8 +158,14 @@ These tests guard the docs. A red one means a doc to update, not a test to weake
 - Run the Go suite as CI does: `GOWORK=off go test ./... -count=1`. The workspace `go.work`
   outside this repo can resolve different dependency versions.
 - On OpenShift, `kubectl get build/<name>` is the OpenShift Build API. Write
-  `build.shipwright.io/<name>`. A BuildRun there runs as the `pipeline` account when
-  `serviceAccount` is unset; a ServiceAccount the plugin generates needs `pipelines-scc` first.
+  `build.shipwright.io/<name>`.
+- A BuildRun with `serviceAccount` unset runs as the namespace `pipeline` account. That is
+  right only when the plugin generated no ServiceAccount. When it did, the generated account
+  carries the BuildConfig's pull secret and the plugin names it in the
+  `buildconfig-to-shipwright/buildrun-template` annotation, so point the BuildRun at it or
+  the builder image will not pull. Grant it the SCC scoped to that one account,
+  `oc adm policy add-scc-to-user pipelines-scc -z <generated-sa> -n <namespace>`. Never bind
+  it with `-g system:serviceaccounts` or to the namespace default account.
 
 ## Commit policy
 
