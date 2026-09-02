@@ -12,22 +12,30 @@ For every resource in a crane export:
 - Anything that is not a BuildConfig passes through untouched.
 - A BuildConfig with a Docker or Source strategy and an output image becomes a Shipwright
   `Build`. The original is removed from the output. When the BuildConfig has a pull secret
-  and names no ServiceAccount, the plugin also generates a `ServiceAccount` carrying it. An
-  inline Dockerfile is preserved in a `ConfigMap`.
+  and names no ServiceAccount, the plugin also generates a `ServiceAccount` carrying it. A
+  BuildConfig that does name a ServiceAccount keeps it: crane migrates that account
+  unchanged and the plugin never overwrites it, warning instead with the `oc secrets link`
+  command that attaches the pull secret on the target. An
+  inline Dockerfile on a Docker strategy is preserved in a `ConfigMap`, pointed at by the
+  Build's `buildconfig-to-shipwright/inline-dockerfile-configmap` annotation; commit it to
+  the source repository before running the Build. On a Source strategy an inline Dockerfile
+  is dropped with a warning, because S2I does not use one.
 - A BuildConfig with a Custom or JenkinsPipeline strategy, or no output image, is skipped:
   it stays in the output unchanged with two annotations saying it was skipped and why. A
-  BuildConfig the plugin cannot convert is treated the same way, marked failed. Neither stops
-  the migration.
+  BuildConfig the plugin cannot convert is treated the same way, marked failed. Shipwright
+  takes one source per Build, so a BuildConfig with more than one source type fails here.
+  Neither stops the migration.
 
 Every field the plugin drops or changes produces a warning, in the log and in an annotation
-on the Build. The full list, field by field, is in [docs/support-matrix.md](docs/support-matrix.md).
+on the Build. The annotation is size-capped, so on a very lossy BuildConfig the log is the
+complete list. The full list, field by field, is in [docs/support-matrix.md](docs/support-matrix.md).
 
 | BuildConfig strategy | Shipwright ClusterBuildStrategy | Outcome |
 |---|---|---|
 | Docker | `buildah` | converted |
 | Source (S2I) | `source-to-image` | converted |
-| Custom | none | skipped, passed through with an annotation |
-| JenkinsPipeline | none | skipped, passed through with an annotation |
+| Custom | none | skipped, passed through with two annotations |
+| JenkinsPipeline | none | skipped, passed through with two annotations |
 
 ## Prerequisites
 
@@ -79,7 +87,11 @@ crane transform BuildConfigPlugin \
 are strings. The flags are listed [below](#plugin-flags); `crane transform optionals
 --plugin-dir ./plugins` prints them with an example each.
 
-### 3. Review the output
+### 3. Write the output, then read it
+
+```bash
+crane apply
+```
 
 `crane apply` writes the result under `output/`:
 
@@ -98,14 +110,20 @@ objects that still say `kind: BuildConfig`:
 
 ```bash
 grep -rl 'kind: BuildConfig' output/resources \
-  | xargs grep -H 'buildconfig-to-shipwright/conversion-'
+  | xargs -r grep -H 'buildconfig-to-shipwright/conversion-'
 ```
+
+The export also carries the resources the plugin left alone, including the BuildConfigs it
+skipped. Read those before step 4: a recreated BuildConfig with an ImageChange or
+ConfigChange trigger starts an OpenShift build as soon as it lands.
 
 ### 4. Apply to the target cluster
 
+`crane` writes each resource under `output/resources/<namespace>/`, so the apply has to
+recurse:
+
 ```bash
-crane apply
-kubectl apply -f output/resources/
+kubectl apply -R -f output/resources/
 
 kubectl wait --for=jsonpath='{.status.registered}'=True \
   build.shipwright.io/webapp -n myapp --timeout=120s
@@ -115,8 +133,18 @@ Write `build.shipwright.io`, not `build`, in every kubectl command. On OpenShift
 name resolves to the OpenShift Build API.
 
 Nothing builds on its own. OpenShift triggers do not exist in Shipwright, so create a
-`BuildRun` to start the first build. On OpenShift with the Builds operator, leave the
-BuildRun's `serviceAccount` unset; it runs as the `pipeline` account.
+`BuildRun` to start the first build.
+
+Which ServiceAccount it runs as depends on whether the plugin generated one. If it did not,
+leave the BuildRun's `serviceAccount` unset and it runs as the namespace `pipeline` account.
+If it did, that account carries the BuildConfig's pull secret and the plugin names it in the
+Build's `buildconfig-to-shipwright/buildrun-template` annotation, so point the BuildRun at
+it. Leaving it unset there drops the pull secret and a private builder image will not pull.
+On OpenShift, grant the generated account the SCC buildah needs, scoped to that one account:
+
+```bash
+oc adm policy add-scc-to-user pipelines-scc -z <generated-sa> -n <namespace>
+```
 
 ## Worked examples
 

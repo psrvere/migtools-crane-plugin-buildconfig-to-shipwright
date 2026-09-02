@@ -50,6 +50,11 @@ vol_count() {
 # crane v0.0.5 and earlier have no --overwrite on apply and do not write a plugin's
 # NewResources. Against such a build every Shipwright Build assertion below fails, which
 # reads like a plugin bug rather than a stale binary. Fail fast with a real explanation.
+#
+# --overwrite is necessary but not sufficient. It landed in migtools/crane 6bca8a7
+# (2026-06-12), about two months before NewResources support in 24eafd8 (2026-08-13).
+# A crane built in that window passes this check and still writes no Build. The commit
+# .github/workflows/test-e2e-minikube-pr.yml pins is the real floor; build from there.
 if ! command -v crane >/dev/null 2>&1; then
     echo "ERROR: no 'crane' on PATH. Build it from migtools/crane main and put it first on PATH."
     exit 1
@@ -179,6 +184,11 @@ if [ -n "$DOCKER_BUILD" ]; then
         "  Secret volume source preserved"
     check '! vol_block "$DOCKER_BUILD" | grep -q "/etc/pki/ca-trust/source/anchors"' \
         "  mount destinationPath not migrated (strategy owns mount paths)"
+    # BuildVolume is {Name, corev1.VolumeSource} and carries no mount path, so the
+    # negative check above cannot fail on its own. The path has to survive somewhere,
+    # and that somewhere is the warning. Assert it, or dropping the warning goes unnoticed.
+    check 'grep -q "original BuildConfig destination paths: /etc/pki/ca-trust/source/anchors" "$DOCKER_BUILD"' \
+        "  mount destinationPath preserved in the conversion warnings"
 
     # Registry lists are trimmed and blank entries dropped before they reach
     # paramValues; the search-registries flag above is padded on purpose.
@@ -212,6 +222,8 @@ if [ -n "$S2I_BUILD" ]; then
         "  ConfigMap volume source preserved"
     check '! vol_block "$S2I_BUILD" | grep -q "/etc/app-config"' \
         "  mount destinationPath not migrated (strategy owns mount paths)"
+    check 'grep -q "original BuildConfig destination paths: /etc/app-config" "$S2I_BUILD"' \
+        "  mount destinationPath preserved in the conversion warnings"
 else
     fail "S2I → Shipwright Build not found in output"
 fi
