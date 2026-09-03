@@ -73,7 +73,7 @@ Either way the BuildConfig itself stays exactly as it was.
 | Field | What happens | Where it lands | What you do by hand | Warning |
 |---|---|---|---|---|
 | `metadata.name` with characters or length not allowed in a DNS-1123 label (63 chars, lowercase, digits, hyphens) | Converted, with a warning. The name is lowercased, invalid runs become `-`, and an 8-character hash of the original is appended | `metadata.name` of the Build | Update anything that refers to the build by its old name | W1 |
-| two BuildConfigs whose names would collide after sanitising | Prevented for any name the plugin had to rewrite: the suffix is a hash of the original, so `my.app` and `my_app` become `my-app-<hash>` with different hashes. The one gap is a name that is already valid and happens to equal another BuildConfig's rewritten name, such as `foo-1cbec737` next to `Foo`. crane runs the plugin once per resource, so that is not detected: both Builds get the same name and the later one overwrites the earlier when the output is applied | `metadata.name` | Nothing, unless you have names of the form `<name>-<8 hex characters>`; then check the output for duplicates | W1 for the rewritten name. W2 and W3 describe the collision but cannot fire from the plugin; see [Warning reference](#warning-reference) |
+| two BuildConfigs whose names would collide after sanitising | Prevented for any name the plugin had to rewrite: the suffix is a hash of the original, so `my.app` and `my_app` become `my-app-<hash>` with different hashes. The one gap is a name that is already valid and happens to equal another BuildConfig's rewritten name, such as `foo-1cbec737` next to `Foo`. crane runs the plugin once per resource, so that is not detected: both Builds get the same name and the later one overwrites the earlier when the output is applied | `metadata.name` | Nothing, unless you have names of the form `<name>-<8 hex characters>`; then check the output for duplicates | W1 for the rewritten name |
 | `metadata.labels` starting with `openshift.io/build`, or the deprecated `buildconfig` label | Dropped silently (logged at INFO only) | | Nothing. These describe OpenShift build machinery | none |
 | `metadata.annotations` starting with `openshift.io/` or `kubectl.kubernetes.io/` | Dropped silently (logged at INFO only) | | Nothing | none |
 | `metadata.name`, `metadata.namespace` | Converted | `metadata.name`, `metadata.namespace` | Nothing | none |
@@ -310,15 +310,14 @@ BuildConfig it came from. The log always has the full text, even when the annota
 Verbatim, with `…` where the plugin fills in a value. W4 and W7 share the template
 `… — passing BuildConfig … through unchanged`, and W5 the template
 `… — passing BuildConfig … through unchanged. Consider migrating to Tekton Pipelines directly.`,
-where the first `…` is the reason shown below. W2 and W3 fire when two resources converted by
-the same converter collide. crane runs the plugin binary once per resource, each with its own
-converter, so neither can fire from the plugin today (see [Metadata](#metadata)).
+where the first `…` is the reason shown below. A retired number keeps its row, reading
+`Retired by BUILD-<n>`, so the numbers never shift.
 
 | # | Text |
 |---|---|
 | W1 | `Generated … name … is not a valid DNS-1123 label of at most … characters — using … instead` |
-| W2 | `Generated … name for … collides with the name already generated for … — using … instead` |
-| W3 | `Hash-suffixed … name … for … still collides with the name already generated for … — resources may overwrite each other` |
+| W2 | Retired by BUILD-2438. Described a name collision between two BuildConfigs converted by one process, which crane never does |
+| W3 | Retired by BUILD-2438, as W2 |
 | W4 | `Custom build strategy is not supported for conversion — passing BuildConfig … through unchanged` |
 | W5 | `JenkinsPipeline build strategy is not supported for conversion — passing BuildConfig … through unchanged. Consider migrating to Tekton Pipelines directly.` |
 | W6 | `unknown build strategy type … for BuildConfig …` (a failure reason, written to the `conversion-reason` annotation, not a warning) |

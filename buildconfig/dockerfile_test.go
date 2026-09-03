@@ -277,8 +277,9 @@ func TestConvertInlineDockerfileWiring(t *testing.T) {
 }
 
 // TestConvertInlineDockerfileConfigMapNaming proves two BuildConfigs whose names sanitize to
-// the same ConfigMap base get distinct names through uniqueName, and that the same input
-// converts to an identical ConfigMap on two independent runs (BUILD-2339 idempotency).
+// the same ConfigMap base get distinct names, because the hash of the original is part of
+// the rewritten name, and that the same input converts to an identical ConfigMap on two
+// independent runs (BUILD-2339 idempotency).
 func TestConvertInlineDockerfileConfigMapNaming(t *testing.T) {
 	inline := "FROM golang:1.21\nCOPY . /app"
 
@@ -295,8 +296,8 @@ func TestConvertInlineDockerfileConfigMapNaming(t *testing.T) {
 		}
 	}
 
-	// my.app and my_app both sanitize to my-app; a single Converter must keep their
-	// ConfigMaps distinct.
+	// my.app and my_app both sanitize to my-app; their hash suffixes differ, so the
+	// ConfigMaps stay distinct.
 	c := &Converter{Log: logrus.New()}
 	res1, out1 := c.Convert(newBC("my.app"))
 	res2, out2 := c.Convert(newBC("my_app"))

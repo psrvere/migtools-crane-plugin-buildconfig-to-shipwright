@@ -48,7 +48,7 @@ func (c *Converter) processInlineDockerfile(bc *buildv1.BuildConfig, b *shipwrig
 
 	switch bc.Spec.Strategy.Type {
 	case buildv1.DockerBuildStrategyType:
-		cmName := c.uniqueName("ConfigMap", bc.Namespace, bc.Name+"-dockerfile")
+		cmName := c.uniqueName("ConfigMap", bc.Name+"-dockerfile")
 		cm := &corev1.ConfigMap{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: "v1",

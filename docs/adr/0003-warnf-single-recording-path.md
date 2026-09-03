@@ -16,8 +16,8 @@ warning text contains user-controlled names.
 
 `warnf` in `outcome.go` is the only thing that counts as a recorded drop. It prefixes the
 message with the BuildConfig's namespace and name, appends it to the converter's list, and
-logs it at WARN. The two places that log at ERROR instead call `recordWarning` directly so
-they still count. `Convert` writes the warnings annotation exactly once, from the same list
+logs it at WARN. The one place that logs at ERROR instead, the inline Dockerfile on a Docker
+strategy, calls `recordWarning` directly so it still counts. `Convert` writes the warnings annotation exactly once, from the same list
 that decides the outcome, cut at 32 KiB by `boundedWarnings` with a note saying how many
 were left out. The log always has the full list.
 

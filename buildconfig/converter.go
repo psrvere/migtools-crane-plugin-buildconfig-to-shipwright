@@ -82,39 +82,17 @@ type Converter struct {
 	// surfaced on the Outcome. It accumulates across the Converter's lifetime;
 	// Convert slices out the per-BuildConfig warnings by index.
 	warnings []string
-
-	// assignedNames tracks generated names (keyed by kind/namespace/name) so
-	// that distinct originals resolving to the same sanitized name within a
-	// single converter lifetime are detected and disambiguated.
-	assignedNames map[string]string
 }
 
-// uniqueName sanitizes a generated resource name into a valid DNS-1123 label
-// and guards against two distinct original names resolving to the same final
-// name for the same kind and namespace.
-func (c *Converter) uniqueName(kind, namespace, original string) string {
+// uniqueName sanitizes a generated resource name into a valid DNS-1123 label.
+// A rewritten name carries a hash of the original, which keeps two different
+// originals apart. No cross-BuildConfig check exists (ADR-0006).
+func (c *Converter) uniqueName(kind, original string) string {
 	name, changed := sanitizeDNS1123Label(original)
 	if changed {
 		c.warnf("Generated %s name %q is not a valid DNS-1123 label of at most %d characters — using %q instead", kind, original, maxGeneratedNameLength, name)
 	}
 
-	if c.assignedNames == nil {
-		c.assignedNames = map[string]string{}
-	}
-	key := kind + "/" + namespace + "/" + name
-	if owner, ok := c.assignedNames[key]; ok && owner != original {
-		name = withHashSuffix(name, original)
-		c.warnf("Generated %s name for %q collides with the name already generated for %q — using %q instead", kind, original, owner, name)
-		key = kind + "/" + namespace + "/" + name
-		if owner, ok := c.assignedNames[key]; ok && owner != original {
-			// A genuine error (resources may overwrite each other), so log it
-			// loudly — but still record it as a conversion warning so the
-			// outcome reflects it.
-			msg := fmt.Sprintf("Hash-suffixed %s name %q for %q still collides with the name already generated for %q — resources may overwrite each other", kind, name, original, owner)
-			c.Log.Error(c.recordWarning(msg))
-		}
-	}
-	c.assignedNames[key] = original
 	return name
 }
 
@@ -125,7 +103,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	defer func() { c.curNS, c.curName = "", "" }()
 	startWarnings := len(c.warnings)
 	b := &shipwrightv1beta1.Build{}
-	b.Name = c.uniqueName("Build", bc.Namespace, bc.Name)
+	b.Name = c.uniqueName("Build", bc.Name)
 	b.Kind = "Build"
 	b.APIVersion = "shipwright.io/v1beta1"
 	b.Namespace = bc.Namespace
@@ -714,7 +692,7 @@ func (c *Converter) generateServiceAccount(bc *buildv1.BuildConfig, pullSecret *
 	if pullSecret == nil {
 		return nil
 	}
-	saName := c.uniqueName("ServiceAccount", bc.Namespace, bc.Name)
+	saName := c.uniqueName("ServiceAccount", bc.Name)
 
 	return &corev1.ServiceAccount{
 		TypeMeta: metav1.TypeMeta{

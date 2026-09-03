@@ -28,8 +28,8 @@ different remedy in each warning.
   name, never from `spec.serviceAccount`.
 - No state carries from one BuildConfig to the next at runtime. crane execs the plugin once
   per resource, so each conversion is a fresh process, and the old cache of accounts is
-  gone. Within one process the Converter does keep `assignedNames`, to catch generated
-  names that collide, and `warnings`, sliced per BuildConfig by index; only tests reuse one.
+  gone. Within one process the Converter keeps `warnings`, sliced per BuildConfig by
+  index; only tests reuse one.
 - A missing push secret always produces at least `converted-with-warnings`.
 
 ## Consequences
