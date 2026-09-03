@@ -247,7 +247,10 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 	}
 	row := regexp.MustCompile("(?m)^\\| W(\\d+) \\| ([^\n]*)$")
 	quote := regexp.MustCompile("`([^`]+)`")
+	// A row that quotes no warning is allowed when it is a known alias row, or a
+	// retired one, whose text starts with "Retired by BUILD-<n>".
 	prose := map[string]bool{"W33": true}
+	retired := regexp.MustCompile(`^Retired by BUILD-[0-9]+\b`)
 	out := map[string]string{}
 	rows := map[int]int{}
 	highest := 0
@@ -265,7 +268,7 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 		switch {
 		case q != nil:
 			out[id] = q[1]
-		case !prose[id]:
+		case !prose[id] && !retired.MatchString(m[2]):
 			t.Errorf("%s row %s quotes no warning and is not a known prose row", supportMatrixPath, id)
 		}
 	}

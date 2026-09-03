@@ -48,8 +48,9 @@ func outcomeFailed(reason string) Outcome  { return Outcome{State: OutcomeFailed
 // All field-drop and degraded-conversion messages must go through warnf. A
 // message logged directly via c.Log would not be counted, so the BuildConfig
 // would be reported as cleanly converted while the field was silently dropped
-// (BUILD-2319). The one deliberate exception is the name-collision error in
-// uniqueName, which records into c.warnings explicitly alongside a louder ERROR.
+// (BUILD-2319). The one deliberate exception is the inline Dockerfile on a
+// Docker strategy, which records into c.warnings explicitly alongside a louder
+// ERROR.
 func (c *Converter) warnf(format string, args ...interface{}) {
 	c.Log.Warn(c.recordWarning(fmt.Sprintf(format, args...)))
 }
@@ -57,10 +58,10 @@ func (c *Converter) warnf(format string, args ...interface{}) {
 // recordWarning attributes a message to the BuildConfig being converted, appends
 // it to c.warnings, and returns the attributed text for the caller to log.
 //
-// It exists so the two call sites that log a drop at ERROR rather than WARN (the
-// name collision in uniqueName and the inline Dockerfile on a Docker strategy)
-// still get the same attribution as warnf, instead of being the only entries in
-// the annotation with no BuildConfig on them.
+// It exists so the one call site that logs a drop at ERROR rather than WARN (the
+// inline Dockerfile on a Docker strategy) still gets the same attribution as
+// warnf, instead of being the only entry in the annotation with no BuildConfig
+// on it.
 func (c *Converter) recordWarning(msg string) string {
 	// curName is empty only for a warning raised outside Convert; such a message
 	// has no BuildConfig to attribute and is recorded unprefixed.

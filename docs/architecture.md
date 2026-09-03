@@ -124,10 +124,9 @@ flowchart TD
 
 Every warning goes through one function, `warnf` in `outcome.go`. It prefixes the
 message with the BuildConfig's namespace and name, appends it to the converter's list, and
-logs it. Two places log at ERROR instead of WARN but still record through the same list:
-a generated name that still collides after hash-suffixing, and an inline Dockerfile on a
-Docker strategy. The step 17 decision, the annotation on the Build, and the `Warnings`
-field on the outcome all read that one list.
+logs it. One place logs at ERROR instead of WARN but still records through the same list:
+an inline Dockerfile on a Docker strategy. The step 17 decision, the annotation on the
+Build, and the `Warnings` field on the outcome all read that one list.
 
 ## Steps that depend on each other
 
@@ -191,11 +190,8 @@ Names go through `uniqueName` in `converter.go`, which calls `sanitizeDNS1123Lab
 `names.go`. Sanitizing lowercases, replaces invalid characters, and trims to 63 characters.
 Whenever any of that changes the name, or the name was too long, an 8-character hash of the
 original is appended and a warning is recorded, so `MyApp` becomes `myapp-` plus eight hex
-characters. A second suffix handles collisions, two different originals of the same kind in
-the same namespace that sanitize to the same name within one `Converter`. That cannot happen
-today, because crane starts a fresh process per resource and the three generated resources
-have different kinds. If even the suffixed name collides, the collision is logged at ERROR,
-recorded as a warning, and the name is returned anyway. 63 is the DNS label limit rather than
+characters. There is no cross-BuildConfig collision check: crane starts a fresh process per
+resource, so no `Converter` ever sees two BuildConfigs. 63 is the DNS label limit rather than
 the 253-character name limit because Shipwright appends its own suffixes. The same input
 always produces the same output, so converting twice is safe.
 
@@ -253,7 +249,7 @@ reasoning. Those records do not exist yet; the numbers below are the planned one
 
 | # | Rule | Why | Pinned by |
 |---|---|---|---|
-| 1 | Every dropped or degraded field is recorded through `warnf` (or `recordWarning` for the two ERROR-level drops). The one intended exception is `filterMetadata`, which drops OpenShift-managed labels and annotations at INFO. A direct `Log.Warn` for a drop is a review error | a warning that bypasses the list makes a lossy conversion look clean. This happened once, for every trigger type | `attribution_test.go` (`TestConvertSilentDropsAreRecorded`); the exception by `converter_test.go` (`TestConvertMetadataLabelsFiltersInternal`); otherwise convention and review. ADR-0003 |
+| 1 | Every dropped or degraded field is recorded through `warnf` (or `recordWarning` for the one ERROR-level drop, the inline Dockerfile). The one intended exception is `filterMetadata`, which drops OpenShift-managed labels and annotations at INFO. A direct `Log.Warn` for a drop is a review error | a warning that bypasses the list makes a lossy conversion look clean. This happened once, for every trigger type | `attribution_test.go` (`TestConvertSilentDropsAreRecorded`); the exception by `converter_test.go` (`TestConvertMetadataLabelsFiltersInternal`); otherwise convention and review. ADR-0003 |
 | 2 | The plugin never contacts a cluster. Image references resolve from flags or the documented fallback | the reason this plugin exists instead of the old `crane convert` | convention only. ADR-0001 |
 | 3 | One BuildConfig that cannot convert never aborts the crane run. `Run` returns no error for it; the object passes through annotated | crane aborts the whole migration on any plugin error | `outcome_test.go` (`TestRunDoesNotAbortOnConversionFailure`). ADR-0002 |
 | 4 | Steps 4 to 18 and their warnings run only on a BuildConfig that passed step 2, where Custom and JenkinsPipeline are skipped and an unknown strategy type or an unresolvable `from` image fails, and the output gate in step 3. Step 2 still runs before the gate; see the second ordering problem above | otherwise an unconverted BuildConfig gets false "field dropped" warnings | `postcommit_test.go` (`TestPostCommitSilentOnPassThroughPaths`) pins step 12; the rest is convention and review |
@@ -264,7 +260,7 @@ reasoning. Those records do not exist yet; the numbers below are the planned one
 | 9 | The BuildRun template is inert text in an annotation, written only when `spec.resources` has requests or limits. Under a strategy override it carries no `stepResources`, and a warning says so | a live BuildRun in the migration stream would start a build on apply | `converter_test.go` (`TestConvertResourcesDockerStrategy`, `TestConvertResourcesCustomStrategyOmitsStepResources`). ADR-0005 |
 | 10 | Converted volumes keep their exact BuildConfig names | Shipwright matches volumes by name; a rename hides the cluster's error | `volumes_test.go`. ADR-0007 |
 | 11 | The warnings annotation stays under 32 KiB and says when it was cut | Kubernetes rejects an object whose annotations exceed 256 KiB; warning text contains user-controlled names | `attribution_test.go` (`TestWarningsAnnotationStaysBounded`). ADR-0003 |
-| 12 | Generated names are valid DNS labels and stable across runs. A collision gets a second suffix; one that survives that is logged at ERROR and recorded as a warning. Output YAML is byte-stable for the same input | converting twice must give the same result | `names_test.go` (`TestGeneratedNamesAreDNS1123Compliant`, `TestCollidingTruncatedNamesGetDistinctNames`), `serialization_test.go` (`TestToUnstructuredOmitsSerializationNoise`) |
+| 12 | Generated names are valid DNS labels and stable across runs. Output YAML is byte-stable for the same input | converting twice must give the same result | `names_test.go` (`TestGeneratedNamesAreDNS1123Compliant`, `TestCollidingTruncatedNamesGetDistinctNames`), `serialization_test.go` (`TestToUnstructuredOmitsSerializationNoise`) |
 | 13 | Triggers are preserved and warned about, never converted. The preservation annotation never carries webhook secrets | no trigger type works after migration today | `triggers_test.go`. ADR-0008 |
 | 14 | Never generate a volume for a source secret or ConfigMap | the Dockerfile also needs an edit the plugin cannot make; half the job produces builds that fail silently | `converter_test.go` (source secrets and ConfigMaps tests) |
 | 15 | A convertible BuildConfig always produces a Build. Degraded and warned, never blocked | the migration's job is to get resources onto the target and report gaps | `outcome_test.go` (`TestConvertOutcomeConvertedWithWarnings`) |
