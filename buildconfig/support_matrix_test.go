@@ -20,6 +20,8 @@ const supportMatrixPath = "../docs/support-matrix.md"
 //     or reworded warning without a row fails the build;
 //   - every warning quoted in the doc's warning reference matches a template
 //     that still exists in the code, so a row for a deleted warning fails;
+//   - the warning reference numbers its rows W1 to Wn with no gap and no
+//     repeat, so a deleted or duplicated row fails;
 //   - every OutcomeState value and every *Annotation constant appears in the
 //     doc.
 //
@@ -231,7 +233,9 @@ func collectWarningTemplates(p *parsedPackage) []string {
 // quotedWarnings returns the first backtick-quoted string of every row in
 // the doc's "Warning reference" table, keyed by its W-number. A row with no
 // quote is an error unless it is a known prose row, so a row that loses its
-// backticks cannot drop out of the check unnoticed.
+// backticks cannot drop out of the check unnoticed. Every number from W1 to
+// the highest row must appear exactly once, so a deleted row, even a prose
+// one, or a duplicated number fails here instead of vanishing from the map.
 func quotedWarnings(t *testing.T, doc string) map[string]string {
 	t.Helper()
 	_, section, found := strings.Cut(doc, "## Warning reference")
@@ -241,21 +245,37 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 	if next := strings.Index(section, "\n## "); next >= 0 {
 		section = section[:next]
 	}
-	row := regexp.MustCompile("(?m)^\\| (W\\d+) \\| ([^\n]*)$")
+	row := regexp.MustCompile("(?m)^\\| W(\\d+) \\| ([^\n]*)$")
 	quote := regexp.MustCompile("`([^`]+)`")
 	prose := map[string]bool{"W33": true}
 	out := map[string]string{}
+	rows := map[int]int{}
+	highest := 0
 	for _, m := range row.FindAllStringSubmatch(section, -1) {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("%s row W%s: %v", supportMatrixPath, m[1], err)
+		}
+		id := "W" + m[1]
+		rows[n]++
+		if n > highest {
+			highest = n
+		}
 		q := quote.FindStringSubmatch(m[2])
 		switch {
 		case q != nil:
-			out[m[1]] = q[1]
-		case !prose[m[1]]:
-			t.Errorf("%s row %s quotes no warning and is not a known prose row", supportMatrixPath, m[1])
+			out[id] = q[1]
+		case !prose[id]:
+			t.Errorf("%s row %s quotes no warning and is not a known prose row", supportMatrixPath, id)
 		}
 	}
-	if len(out) < 40 {
-		t.Fatalf("found only %d quoted warnings in the reference table", len(out))
+	if highest == 0 {
+		t.Fatalf("%s has no rows in its warning reference table", supportMatrixPath)
+	}
+	for n := 1; n <= highest; n++ {
+		if rows[n] != 1 {
+			t.Errorf("%s has %d rows for W%d in the warning reference; want exactly one", supportMatrixPath, rows[n], n)
+		}
 	}
 	return out
 }

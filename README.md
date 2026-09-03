@@ -7,7 +7,7 @@ A [crane](https://github.com/konveyor/crane) transform plugin that converts Open
 During crane's transform phase, this plugin:
 
 1. Detects `BuildConfig` resources in the exported namespace
-2. Whiteouts the original BuildConfig (marks it for deletion)
+2. Whiteouts the BuildConfig it converts (marks it for deletion). A skipped or failed BuildConfig passes through unchanged
 3. Generates a corresponding Shipwright `Build` resource
 4. Generates a `ServiceAccount` named after the BuildConfig when a pull secret is referenced and the BuildConfig names no ServiceAccount; a named ServiceAccount is migrated by crane unchanged, and the plugin warns with the `oc secrets link` command that attaches the pull secret on the target
 

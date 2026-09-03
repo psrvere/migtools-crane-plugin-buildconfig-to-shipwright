@@ -131,7 +131,7 @@ Applies to `dockerStrategy.volumes[]` and `sourceStrategy.volumes[]`.
 |---|---|---|---|---|
 | a volume with an empty `name` | Dropped | | Name it | W24 |
 | a second volume with the same `name` | Dropped | | Remove the duplicate | W25 |
-| a volume whose `source.type` is not `Secret` or `ConfigMap` | Dropped | | Only Secret and ConfigMap volumes exist in Shipwright | W26 |
+| a volume whose `source.type` is not `Secret` or `ConfigMap`, that is `CSI` | Dropped | | The plugin maps only Secret and ConfigMap sources. Shipwright itself takes any pod volume source on `spec.volumes[]`, so add the volume by hand as the next row describes, with a `csi` source on the Build | W26 |
 | a `Secret` or `ConfigMap` volume | Converted, with a warning. The Build will not register (`Registered=False`, reason `UndefinedVolume`) until the strategy declares the volume | `spec.volumes[]`, under the same name | Copy the ClusterBuildStrategy, add an overridable volume with that name and a mount at the original path, and point the Build at the copy. See `docs/volume-migration.md` | W27 per volume, W28 once |
 | `volumes[].mounts[].destinationPath` | Carried into the warning only. Shipwright takes mount paths from the strategy, not the Build | | Use the path when you edit the strategy copy | in W27 |
 
@@ -190,9 +190,12 @@ Applies to `dockerStrategy.volumes[]` and `sourceStrategy.volumes[]`.
 
 ### Triggers
 
-No trigger type works after migration. Neither upstream Shipwright nor the Builds for OpenShift
-operator provides webhook or image-change triggering today. Every trigger is dropped with a
-warning, and the sanitised list is kept on the Build so it can be rebuilt later.
+The plugin translates no trigger. Every trigger is dropped with a warning, and the sanitised list
+is kept on the Build so it can be rebuilt later. Shipwright's Build API has a `spec.trigger` field
+for GitHub webhooks and Tekton Pipeline runs, served by the separate
+[Triggers](https://github.com/shipwright-io/triggers) component. That component calls itself a
+work in progress and the Builds for OpenShift operator does not ship it. Nothing implements the
+`Image` trigger type.
 
 | Field | What happens | Where it lands | What you do by hand | Warning |
 |---|---|---|---|---|
