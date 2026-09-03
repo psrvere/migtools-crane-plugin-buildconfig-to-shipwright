@@ -62,8 +62,11 @@ The four annotations on the Build:
 
 ## What to do next
 
-1. Create the three secrets in the target namespace. The plugin references them by name and
-   does not migrate them: `registry-pull`, `npmrc`, and `quay-push`.
+1. The generated resources reference three Secrets by name: `registry-pull`, `npmrc`,
+   and `quay-push`. They must exist in the target namespace. The plugin leaves Secrets
+   alone. `crane export` picks them up and `crane apply` creates them on the target,
+   unless another transform plugin you selected filters them out. If you applied only
+   the resources from `expected/`, create them yourself.
 
 2. Apply all three generated resources. The Build will not register yet:
 
