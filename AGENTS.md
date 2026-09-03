@@ -138,7 +138,7 @@ not exist on `main` yet. They are listed here so the table is complete when thos
 
 | Test | Guards | Fix |
 |---|---|---|
-| `TestSupportMatrixCoversEveryWarning` | every warning template has a row in the matrix, and every quoted warning still exists | add or reword the row in `docs/support-matrix.md`; to retire a warning, keep its row and make the text `Retired by BUILD-<n>` |
+| `TestSupportMatrixCoversEveryWarning` | every warning template has a row in the matrix, and every quoted warning still exists | add or reword the row in `docs/support-matrix.md`. To retire a warning, keep its row and start the cell with `Retired by BUILD-` and the story number. Put no backticks anywhere in that cell: a backtick-quoted string is read as a live warning template, and the row then fails the doc-to-code check instead |
 | `TestArchitectureDocNamesEveryFileAndStage` | every non-test Go file and every `process*` method is named in the architecture page | add the line |
 | `TestInvariantsCiteRealTests` | every test the architecture page cites exists | rename it in the page, or restore the test |
 | `TestExamplesMatchCommittedOutput` | each `docs/examples/*/expected/` matches the plugin's output | `go test ./buildconfig -run TestExamplesMatchCommittedOutput -update` (once #66 to #68 land; the flag does not exist before that), then re-read that example's README. A regenerated expectation is a changed assertion, so it is read line by line like any other golden file |

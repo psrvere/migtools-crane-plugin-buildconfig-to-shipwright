@@ -232,9 +232,10 @@ func collectWarningTemplates(p *parsedPackage) []string {
 
 // quotedWarnings returns the first backtick-quoted string of every row in
 // the doc's "Warning reference" table, keyed by its W-number. A row with no
-// quote is an error unless it is a known prose row, so a row that loses its
-// backticks cannot drop out of the check unnoticed. Every number from W1 to
-// the highest row must appear exactly once, so a deleted row, even a prose
+// quote is an error unless it is a known alias row, or a retired one whose
+// text starts with "Retired by BUILD-" and a story number, so a row that loses
+// its backticks cannot drop out of the check unnoticed. Every number from W1 to
+// the highest row must appear exactly once, so a deleted row, even an alias
 // one, or a duplicated number fails here instead of vanishing from the map.
 func quotedWarnings(t *testing.T, doc string) map[string]string {
 	t.Helper()
@@ -247,9 +248,7 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 	}
 	row := regexp.MustCompile("(?m)^\\| W(\\d+) \\| ([^\n]*)$")
 	quote := regexp.MustCompile("`([^`]+)`")
-	// A row that quotes no warning is allowed when it is a known alias row, or a
-	// retired one, whose text starts with "Retired by BUILD-<n>".
-	prose := map[string]bool{"W33": true}
+	alias := map[string]bool{"W33": true}
 	retired := regexp.MustCompile(`^Retired by BUILD-[0-9]+\b`)
 	out := map[string]string{}
 	rows := map[int]int{}
@@ -268,8 +267,8 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 		switch {
 		case q != nil:
 			out[id] = q[1]
-		case !prose[id] && !retired.MatchString(m[2]):
-			t.Errorf("%s row %s quotes no warning and is not a known prose row", supportMatrixPath, id)
+		case !alias[id] && !retired.MatchString(m[2]):
+			t.Errorf("%s row %s quotes no warning and is not a known alias row", supportMatrixPath, id)
 		}
 	}
 	if highest == 0 {

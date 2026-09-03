@@ -85,8 +85,10 @@ type Converter struct {
 }
 
 // uniqueName sanitizes a generated resource name into a valid DNS-1123 label.
-// A rewritten name carries a hash of the original, which keeps two different
-// originals apart. No cross-BuildConfig check exists (ADR-0006).
+// A name the plugin had to rewrite carries a hash of the original, so two
+// rewritten originals stay apart. An already-valid name that happens to equal
+// another BuildConfig's rewritten name is not detected; see the Metadata row in
+// docs/support-matrix.md. No cross-BuildConfig check exists (ADR-0006).
 func (c *Converter) uniqueName(kind, original string) string {
 	name, changed := sanitizeDNS1123Label(original)
 	if changed {

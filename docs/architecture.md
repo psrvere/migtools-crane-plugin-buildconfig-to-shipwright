@@ -190,10 +190,11 @@ Names go through `uniqueName` in `converter.go`, which calls `sanitizeDNS1123Lab
 `names.go`. Sanitizing lowercases, replaces invalid characters, and trims to 63 characters.
 Whenever any of that changes the name, or the name was too long, an 8-character hash of the
 original is appended and a warning is recorded, so `MyApp` becomes `myapp-` plus eight hex
-characters. There is no cross-BuildConfig collision check: crane starts a fresh process per
-resource, so no `Converter` ever sees two BuildConfigs. 63 is the DNS label limit rather than
-the 253-character name limit because Shipwright appends its own suffixes. The same input
-always produces the same output, so converting twice is safe.
+characters. There is no cross-BuildConfig collision check: `plugin.Run` builds a fresh
+`Converter` for every resource, and crane execs the binary once per resource, so no
+`Converter` sees two BuildConfigs at runtime; only tests reuse one. 63 is the DNS label
+limit rather than the 253-character name limit because Shipwright appends its own suffixes.
+The same input always produces the same output, so converting twice is safe.
 
 The annotations the plugin writes, and where:
 
