@@ -396,3 +396,57 @@ func TestChainDedupesSharedImage(t *testing.T) {
 		t.Errorf("want exactly one info line for the shared image, got %d", n)
 	}
 }
+
+// The same image as the strategy from and as the source.images from, with
+// paths: the paths warning names it, so the info line must not name it again.
+// chainInputs drops the source.images entry for that reason but still returns
+// the strategy image, which is what made this shape emit both.
+func TestChainSharedImageWithPathsGetsOnlyTheWarning(t *testing.T) {
+	bc := chainConsumer(withoutTrigger, func(bc *buildv1.BuildConfig) {
+		bc.Spec.Strategy.DockerStrategy.From = &corev1.ObjectReference{Kind: "ImageStreamTag", Name: chainArtifactRef}
+	})
+	_, _, hook := convertAlone(t, bc, nil)
+	ref := chainRegistry + chainArtifactRef
+	if n := countContaining(warnMessages(hook), "source.images copied 1 path(s) from "+ref); n != 1 {
+		t.Errorf("want one paths warning naming %s, got %d: %v", ref, n, warnMessages(hook))
+	}
+	if n := len(logMessages(hook, logrus.InfoLevel, "from its own namespace")); n != 0 {
+		t.Errorf("the paths warning already names the image; got %d info line(s): %v", n, logMessages(hook, logrus.InfoLevel, ""))
+	}
+}
+
+// Two tags mapped onto one image resolve to the same text. The info line is
+// de-duplicated on the resolved reference, not only on the tag, so the
+// operator does not read the identical sentence twice.
+func TestChainDedupesOnTheResolvedImage(t *testing.T) {
+	bc := chainConsumer(withoutTrigger, withoutPaths, cleanOutput)
+	mapping := map[string]string{
+		chainNS + "/" + chainArtifactRef: "quay.io/acme/same:latest",
+		chainNS + "/" + chainRuntimeRef:  "quay.io/acme/same:latest",
+	}
+	_, outcome, hook := convertAlone(t, bc, mapping)
+	infos := logMessages(hook, logrus.InfoLevel, "")
+	if n := countContaining(infos, "pulls quay.io/acme/same:latest from its own namespace"); n != 1 {
+		t.Errorf("want one info line for the shared target, got %d: %v", n, infos)
+	}
+	if outcome.State != OutcomeConverted {
+		t.Errorf("outcome = %q with warnings %v, want %q", outcome.State, outcome.Warnings, OutcomeConverted)
+	}
+}
+
+// Several source.images entries is the artifact chain with more than one
+// producer. It fails, and the error owes the same rewrite the paths warning
+// gives.
+func TestChainMultipleImageSourcesNameTheRewrite(t *testing.T) {
+	bc := chainConsumer(withoutTrigger, func(bc *buildv1.BuildConfig) {
+		bc.Spec.Source.Images = append(bc.Spec.Source.Images, buildv1.ImageSource{
+			From:  corev1.ObjectReference{Kind: "ImageStreamTag", Name: "second-artifact:latest"},
+			Paths: []buildv1.ImageSourcePath{{SourcePath: "/out/app.jar", DestinationDir: "."}},
+		})
+	})
+	_, outcome, _ := convertAlone(t, bc, nil)
+	if outcome.State != OutcomeFailed {
+		t.Fatalf("converted with outcome %q, want %q", outcome.State, OutcomeFailed)
+	}
+	assertContainsAll(t, outcome.Reason, "multiple image sources are not supported", "COPY --from=", "remove source.images")
+}

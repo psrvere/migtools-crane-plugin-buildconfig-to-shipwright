@@ -37,7 +37,7 @@ are left out of the template with a warning rather than guessed.
   template runs as the default account, and the pull secret the plugin set up is never used.
 - A BuildConfig with a ServiceAccount but no resources gets no template and no message.
   Nobody owns that gap.
-- The trigger step reads this annotation one step before it is written, so the ConfigChange
+- The trigger step reads this annotation before the step that writes it, so the ConfigChange
   warning never mentions the template. Listed in the architecture page's ordering defects.
 - The annotation shares the object's size budget with the warnings and the preserved
   triggers.

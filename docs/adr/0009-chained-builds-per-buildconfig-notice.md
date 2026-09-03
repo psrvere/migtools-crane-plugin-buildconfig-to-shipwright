@@ -29,13 +29,20 @@ that warning. Where no warning names the image, print an info line and leave the
   warning or to the info line. It is never a warning of its own.
 - The info line goes through `c.Log.Info`, not `warnf`, so a conversion with no other loss
   stays `converted`. This is not an exception to ADR-0003: nothing was dropped.
-- One notice per image. An image a trigger warning carries gets no info line.
+- One info line per image. An image a warning already names, the dropped ImageChange trigger
+  or the `source.images` paths warning, gets no info line. `chainWatchedByTrigger` and
+  `chainWarnedBySourceImages` in `chain.go` are the one place each of those two decisions is
+  made, so the warning and the info line cannot drift into naming the same image twice. The
+  sentence itself rides on every warning that names the image, so a BuildConfig whose trigger
+  and whose `source.images` both point at one image reads it on both warnings. Each warning
+  stands alone and repeating the remedy on both is the lesser evil.
 
 ## Consequences
 
 - The info line reaches crane's terminal output and nowhere on the Build. A consumer that
-  reads only the annotations cannot see it. A separate informational annotation is the
-  intended follow-up if that matters.
+  reads only the annotations cannot see it, and this is the one case with no warning to fall
+  back on. A separate informational annotation is the intended follow-up if that matters. No
+  story is filed for it.
 - An imported ImageStream in the same namespace gets the same notice; the plugin cannot tell
   it apart, which is why the notice says "if".
 - A cross-BuildConfig chain graph belongs to a pass over crane's written output, not to the

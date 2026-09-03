@@ -826,7 +826,10 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		b.Spec.Source = source
 	} else if len(images) > 0 {
 		if len(images) > 1 {
-			return fmt.Errorf("multiple image sources are not supported in Shipwright (BuildConfig %s)", bc.Name)
+			// Several source.images entries is the artifact chain with more
+			// than one producer; the same multi-stage rewrite covers it, one
+			// COPY --from per image (BUILD-2326).
+			return fmt.Errorf("multiple image sources are not supported in Shipwright (BuildConfig %s); source.images was OpenShift's chained-build pattern, which Shipwright expresses as a multi-stage Dockerfile: COPY --from=<image> the files you need from each and remove source.images", bc.Name)
 		}
 		image := images[0]
 		if image.As != nil {

@@ -56,7 +56,7 @@ In the quotes, `…` marks a value the plugin fills in, such as a BuildConfig na
 | a strategy `from` or image-source `from` whose `kind` is not `ImageStreamTag`, `ImageStreamImage` or `DockerImage`. For a Docker strategy an empty `kind` counts as unrecognised | failed | Set `kind` on the reference | `unknown image reference kind … for …`, wrapped as `error resolving Docker strategy From field: …`, `error resolving Source strategy From field: …` or `failed to resolve image source (BuildConfig …): …` depending on which reference failed |
 | more than one of `source.git`, `source.binary`, `source.images` set | failed | Split into one BuildConfig per source. When `source.images` is one of them, that was OpenShift's chained-build pattern: rewrite the Dockerfile as a multi-stage build (`COPY --from=<image>`) and remove `source.images`. The error says so | `multiple source types are not supported in a single build in Shipwright (BuildConfig …)`, followed by `; source.images alongside another source was OpenShift's chained-build pattern, which Shipwright expresses as a multi-stage Dockerfile: COPY --from=<image> the files you need and remove source.images` when `source.images` is one of them |
 | `source.binary` without `asFile` (an extracted archive) | failed | Shipwright's local source takes a directory upload, not an archive. Switch to a git or single-file source | `binary archive source (extracted archive) is not supported in Shipwright, only single-file binary sources (asFile) (BuildConfig …)` |
-| more than one entry in `source.images` | failed | One image source per Build. Split the BuildConfig | `multiple image sources are not supported in Shipwright (BuildConfig …)` |
+| more than one entry in `source.images` | failed | One image source per Build. This was OpenShift's chained-build pattern with more than one producer: rewrite the Dockerfile as a multi-stage build, one `COPY --from=<image>` per image, and remove `source.images` | `multiple image sources are not supported in Shipwright (BuildConfig …); source.images was OpenShift's chained-build pattern, which Shipwright expresses as a multi-stage Dockerfile: COPY --from=<image> the files you need from each and remove source.images` |
 | the Build, ServiceAccount, ConfigMap or BuildRun template cannot be serialised | failed | Report it. This should not happen on a valid export | `error converting Build to unstructured: …`, `error converting ServiceAccount to unstructured: …`, `error converting inline-Dockerfile ConfigMap to unstructured: …`, `error marshaling BuildRun spec for BuildConfig …: …`, `error unmarshaling BuildRun spec for BuildConfig …: …` or `error marshaling BuildRun template for BuildConfig …: …` |
 | the plugin cannot read its flags or decode the BuildConfig | none. The plugin returns an error and crane aborts the whole transform, not just this BuildConfig | Fix the flag value. A BuildConfig that does not decode should be reported | `error parsing optional fields: …`, `error marshaling BuildConfig to JSON: …` or `error decoding BuildConfig: …` |
 
@@ -207,8 +207,8 @@ work in progress and the Builds for OpenShift operator does not ship it. Nothing
 | any triggers at all | One summary warning, and the triggers are preserved | the annotation `buildconfig-to-shipwright/original-triggers`: type, secret reference name, `allowEnv`, `imageChange.from`, `paused`. Inline secret values and `lastTriggeredImageID` are never included | Keep the annotation until triggers exist in Shipwright | W58, and W51 if the list cannot be encoded |
 
 Note: the plugin has two wordings for the ConfigChange warning. The one that mentions the BuildRun
-template (W55) is never used today, because triggers are processed one step before the template
-is written. You always get W56, even when the Build carries a template.
+template (W55) is never used today, because triggers are processed before the step that writes
+the template. You always get W56, even when the Build carries a template.
 
 ### Fields the plugin never reads
 
@@ -262,12 +262,13 @@ once per resource, so the plugin never sees both BuildConfigs. What it does inst
 consumer, whenever a strategy `from`, a `source.images[].from` or an ImageChange trigger names an
 `ImageStreamTag` in the BuildConfig's own namespace:
 
-- W54 and W32 end with ` If another BuildConfig in namespace … builds that image, run its BuildRun to completion before starting this Build; Shipwright does not order BuildRuns.`
-- an input no warning names gets an info line in crane's output, `BuildConfig … pulls … from its own namespace.` followed by the same sentence, and the conversion stays clean.
+- W54 and W32 end with ` If another BuildConfig in namespace … builds that image, run its BuildRun to completion before starting this Build; Shipwright does not order BuildRuns.` Both warnings carry it when both fire on one image, since each stands on its own.
+- an input no warning names gets one info line in crane's output, `BuildConfig … pulls … from its own namespace.` followed by the same sentence, and the conversion stays clean.
 
 An imported ImageStream in the same namespace looks the same to the plugin, so the notice says
 "if". Run the producer's BuildRun to completion, then the consumer's. An artifact chain also needs
 the multi-stage rewrite W32 describes, because the OCI artifact source unpacks the whole image.
+More than one `source.images` entry fails the conversion and the error names the same rewrite.
 
 ## Plugin flags
 

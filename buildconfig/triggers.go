@@ -159,8 +159,10 @@ func (c *Converter) processTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta
 			// On OpenShift this trigger is how a chained build ran the consumer
 			// after the producer pushed. When the watched image is an
 			// ImageStreamTag in this namespace, say what replaces that
-			// ordering (BUILD-2326).
-			if from != nil && chainCandidate(string(from.Kind), from.Namespace, bc.Namespace) {
+			// ordering (BUILD-2326). chainWatchedByTrigger makes that call for
+			// both this warning and the info line in chain.go, so the two
+			// cannot drift into naming the same image twice.
+			if _, chained := chainWatchedByTrigger(bc, trigger); chained {
 				msg += fmt.Sprintf(chainRunOrderSentence, bc.Namespace)
 			}
 			c.warnf("%s", msg)

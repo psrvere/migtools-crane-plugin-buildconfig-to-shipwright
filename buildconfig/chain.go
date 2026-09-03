@@ -18,12 +18,24 @@ const chainRunOrderSentence = " If another BuildConfig in namespace %s builds th
 // namespace. crane exports one namespace, so a producer elsewhere is outside
 // the converted set. An imported stream matches too, and the plugin cannot
 // tell the two apart, so every notice built on this is worded "if".
-func chainCandidate(kind, namespace, bcNamespace string) bool {
-	return kind == "ImageStreamTag" && namespace == bcNamespace
+// refNamespace is the reference's own namespace, already defaulted;
+// bcNamespace is the BuildConfig's.
+func chainCandidate(kind, refNamespace, bcNamespace string) bool {
+	return kind == "ImageStreamTag" && refNamespace == bcNamespace
 }
 
-// chainInput is one image input of a BuildConfig, with its kind and namespace
-// defaulted the way the conversion sites default them.
+// chainKey identifies an image input before resolution, which is how the
+// notices de-duplicate against each other: two references that name the same
+// ImageStreamTag are the same input whatever the mapping flags turn them into.
+func chainKey(namespace, name string) string {
+	return namespace + "/" + name
+}
+
+// chainInput is one image input of a BuildConfig. The namespace is defaulted
+// the way the conversion sites default it. The kind is left as written, also
+// the way the conversion sites leave it: processSource does not default an
+// image-source kind either, and an empty one never reaches the notices, since
+// resolveImageRef rejects it and fails the conversion first.
 type chainInput struct {
 	kind, name, namespace string
 }
@@ -47,6 +59,45 @@ func chainInputs(bc *buildv1.BuildConfig) []chainInput {
 	return inputs
 }
 
+// chainWatchedByTrigger reports whether an ImageChange trigger's watched image
+// is a chain candidate, and returns its key. This is the one place that
+// decision is made: processTriggers reads the bool to decide whether the
+// dropped-trigger warning ends with the run-order sentence, and
+// processChainCandidates reads the key to skip an image that warning already
+// names. Keeping both on one function is what holds ADR-0009's "one notice per
+// image" to the code.
+func chainWatchedByTrigger(bc *buildv1.BuildConfig, trigger buildv1.BuildTriggerPolicy) (string, bool) {
+	if canonicalTriggerType(trigger.Type) != buildv1.ImageChangeBuildTriggerType {
+		return "", false
+	}
+	from, _ := imageChangeWatchedObject(bc, trigger.ImageChange)
+	if from == nil || !chainCandidate(string(from.Kind), from.Namespace, bc.Namespace) {
+		return "", false
+	}
+	return chainKey(from.Namespace, from.Name), true
+}
+
+// chainWarnedBySourceImages reports whether the source.images paths warning
+// already names a chain candidate, and returns its key. processSource emits
+// that warning and appends the run-order sentence to it. chainInputs leaves
+// the entry out for that reason, but the same ImageStreamTag can also be the
+// strategy image, which chainInputs does return, so the key is what keeps the
+// image to one notice.
+func chainWarnedBySourceImages(bc *buildv1.BuildConfig) (string, bool) {
+	images := bc.Spec.Source.Images
+	if len(images) != 1 || len(images[0].Paths) == 0 || images[0].From.Name == "" {
+		return "", false
+	}
+	namespace := images[0].From.Namespace
+	if namespace == "" {
+		namespace = bc.Namespace
+	}
+	if !chainCandidate(string(images[0].From.Kind), namespace, bc.Namespace) {
+		return "", false
+	}
+	return chainKey(namespace, images[0].From.Name), true
+}
+
 // processChainCandidates prints one info line per same-namespace ImageStreamTag
 // input that no warning already names (BUILD-2326). An input an ImageChange
 // trigger watches is carried by that trigger's warning, and source.images with
@@ -54,24 +105,27 @@ func chainInputs(bc *buildv1.BuildConfig) []chainInput {
 // than warnf on purpose: nothing was lost, so the conversion stays clean and
 // the note reaches the terminal but not the Build.
 func (c *Converter) processChainCandidates(bc *buildv1.BuildConfig) {
-	// seen starts with the images whose trigger warning already ends with the
-	// run-order sentence, exactly the candidates processTriggers saw, and then
-	// collects each image this pass notices.
+	// seen starts with the images a warning already names, and then collects
+	// each image this pass notices.
 	seen := map[string]bool{}
 	for _, trigger := range bc.Spec.Triggers {
-		if canonicalTriggerType(trigger.Type) != buildv1.ImageChangeBuildTriggerType {
-			continue
-		}
-		if from, _ := imageChangeWatchedObject(bc, trigger.ImageChange); from != nil && chainCandidate(string(from.Kind), from.Namespace, bc.Namespace) {
-			seen[from.Namespace+"/"+from.Name] = true
+		if key, chained := chainWatchedByTrigger(bc, trigger); chained {
+			seen[key] = true
 		}
 	}
+	if key, warned := chainWarnedBySourceImages(bc); warned {
+		seen[key] = true
+	}
 
+	// printed guards the message rather than the input: two tags in one
+	// namespace can be mapped to the same image, and the identical line twice
+	// reads as a bug.
+	printed := map[string]bool{}
 	for _, in := range chainInputs(bc) {
 		if !chainCandidate(in.kind, in.namespace, bc.Namespace) {
 			continue
 		}
-		key := in.namespace + "/" + in.name
+		key := chainKey(in.namespace, in.name)
 		if seen[key] {
 			continue
 		}
@@ -82,6 +136,10 @@ func (c *Converter) processChainCandidates(bc *buildv1.BuildConfig) {
 		if err != nil {
 			continue
 		}
+		if printed[imageRef] {
+			continue
+		}
+		printed[imageRef] = true
 		// Assigned to msg so the support-matrix test holds the doc to this
 		// wording, the way it does for every warning.
 		msg := fmt.Sprintf("BuildConfig %s pulls %s from its own namespace.", bc.Name, imageRef)
