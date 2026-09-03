@@ -91,9 +91,10 @@ and five more on an error. The rest only add to the Build or warn.
 | 13 | History limits | `processBuildsHistoryLimits` | the two history limits | `spec.retention`; values outside 1 to 10000 are dropped | no |
 | 14 | Registries | `addRegistries` | the three registry flags | strategy params for search, insecure and block lists. When the strategy name is exactly `source-to-image`, and only when the output image's registry is in the insecure list, the list sets `spec.output.insecure` instead, because Shipwright does the push there. An S2I override from `default-build-strategy` gets the `registries-insecure` param like buildah does, since the plugin cannot know how it pushes | no |
 | 15 | Triggers | `processTriggers` in `triggers.go` | `spec.triggers` | the original triggers as an annotation, secrets removed; one warning per trigger and one summary | no |
-| 16 | Resources | `processResources` | `spec.resources` | a BuildRun template with the requests and limits, stored as an annotation. Never a live BuildRun. Under a `default-build-strategy` override the template has no `stepResources`, and a warning asks the user to add them | template cannot be marshalled: failed |
-| 17 | Outcome | inline in `Convert` | the warnings recorded since step 1 | the `conversion-outcome` annotation, and the `conversion-warnings` annotation when any warning fired | no |
-| 18 | Serialize | `toUnstructured`, `stripSerializationNoise` | the Build; the ServiceAccount and ConfigMap were serialized in steps 4 and 6 | the resources crane will write | conversion error: failed |
+| 16 | Chain notices | `processChainCandidates` in `chain.go` | the strategy `from`, `source.images[].from`, and the ImageChange triggers | nothing; one info line per `ImageStreamTag` input in the BuildConfig's own namespace that no warning already names, saying to run its producer first if there is one | no |
+| 17 | Resources | `processResources` | `spec.resources` | a BuildRun template with the requests and limits, stored as an annotation. Never a live BuildRun. Under a `default-build-strategy` override the template has no `stepResources`, and a warning asks the user to add them | template cannot be marshalled: failed |
+| 18 | Outcome | inline in `Convert` | the warnings recorded since step 1 | the `conversion-outcome` annotation, and the `conversion-warnings` annotation when any warning fired | no |
+| 19 | Serialize | `toUnstructured`, `stripSerializationNoise` | the Build; the ServiceAccount and ConfigMap were serialized in steps 4 and 6 | the resources crane will write | conversion error: failed |
 
 ```mermaid
 flowchart TD
@@ -114,19 +115,20 @@ flowchart TD
     S8 --> S9[9 to 13 Deadline, node selector, run policy, post-commit, history limits]
     S9 --> S14[14 Registries]
     S14 --> S15[15 Triggers]
-    S15 --> S16[16 Resources]
-    S16 --> S17{17 Any warnings?}
-    S17 -- no --> C1[converted]
-    S17 -- yes --> C2[converted-with-warnings]
-    C1 --> S18[18 Serialize]
-    C2 --> S18
+    S15 --> S16[16 Chain notices]
+    S16 --> S17[17 Resources]
+    S17 --> S18{18 Any warnings?}
+    S18 -- no --> C1[converted]
+    S18 -- yes --> C2[converted-with-warnings]
+    C1 --> S19[19 Serialize]
+    C2 --> S19
 ```
 
 Every warning goes through one function, `warnf` in `outcome.go`. It prefixes the
 message with the BuildConfig's namespace and name, appends it to the converter's list, and
 logs it. Two places log at ERROR instead of WARN but still record through the same list:
 a generated name that still collides after hash-suffixing, and an inline Dockerfile on a
-Docker strategy. The step 17 decision, the annotation on the Build, and the `Warnings`
+Docker strategy. The step 18 decision, the annotation on the Build, and the `Warnings`
 field on the outcome all read that one list.
 
 ## Steps that depend on each other
@@ -137,20 +139,20 @@ does not matter. Five pairs do depend on order:
 | Later step | Needs from an earlier step |
 |---|---|
 | 14 Registries | the strategy name from step 2, to decide between a param and `output.insecure`; the output image from step 8 |
-| 16 Resources | the strategy name from step 2, to fill in step names; the generated ServiceAccount name from step 4 |
-| 17 Outcome | every warning, so it must run after every other step |
-| 18 Serialize | the annotations written in step 17 |
-| 3 Output gate | must run before steps 4 to 18, which all assume an output image exists |
+| 17 Resources | the strategy name from step 2, to fill in step names; the generated ServiceAccount name from step 4 |
+| 18 Outcome | every warning, so it must run after every other step |
+| 19 Serialize | the annotations written in step 18 |
+| 3 Output gate | must run before steps 4 to 19, which all assume an output image exists |
 
 Two ordering problems exist in the code today. Both are known and tracked; neither breaks
 a build on the cluster.
 
-- **Step 15 reads what step 16 writes.** The ConfigChange trigger warning checks for the
-  BuildRun-template annotation, which step 16 adds one step later. Through `Convert` the
+- **Step 15 reads what step 17 writes.** The ConfigChange trigger warning checks for the
+  BuildRun-template annotation, which step 17 adds two steps later. Through `Convert` the
   annotation is never there yet, so the warning always says "create a BuildRun by hand",
   even when the Build is about to carry a template. A unit test seeds the annotation and
   calls `processTriggers` directly, so it passes without exercising the real order. The likely
-  fix, running step 16 before step 15, belongs to a separate story.
+  fix, running step 17 before step 15, belongs to a separate story.
 - **Step 2 runs before the gate in step 3.** A BuildConfig with no output image goes
   through the whole strategy step, raises its warnings about build args or volumes, and is
   then skipped. Skipped and failed outcomes carry no warnings, so those warnings survive
@@ -167,7 +169,7 @@ Every BuildConfig ends in exactly one of four states, defined in `outcome.go`.
 | `skipped` | the plugin chose not to convert: Custom or JenkinsPipeline strategy, or no output image | the original BuildConfig, passed through | annotations `conversion-outcome` and `conversion-reason`, added by a JSON patch built in `disposition.go` |
 | `failed` | conversion hit an error: an unknown strategy, a bad source or image reference, or a serialization problem | the original BuildConfig, passed through | the same two annotations |
 
-The only transition is `converted` to `converted-with-warnings`, made in step 17 when any
+The only transition is `converted` to `converted-with-warnings`, made in step 18 when any
 warning was recorded. Skipped and failed are final the moment they are returned.
 
 Kubernetes caps all annotations on an object at 256 KiB. The plugin bounds two of the
@@ -230,6 +232,7 @@ Each file carries a label that says how a change to it should be reviewed.
 | `buildconfig/disposition.go` | the JSON patch that annotates a skipped or failed BuildConfig | read every changed line |
 | `buildconfig/imagestream.go` | resolves `from` and image-source references through the mapping flags or the internal-registry fallback | read every changed line |
 | `buildconfig/triggers.go` | step 15: preserve triggers as an annotation, strip webhook secrets, warn | read every changed line |
+| `buildconfig/chain.go` | step 16: chained-build notices for same-namespace ImageStreamTag inputs | read every changed line |
 | `buildconfig/dockerfile.go` | step 6: inline Dockerfile to ConfigMap | read every changed line |
 | `buildconfig/names.go` | DNS-1123 sanitizing and hash suffixing | trust the tests |
 | `buildconfig/postcommit.go` | step 12: post-commit hook warning | trust the tests |
@@ -249,14 +252,14 @@ under `.github/`. Each of those can turn CI green without proving anything.
 
 Each rule names the test that fails if it is broken. Where no test pins a rule, the table
 says so. Rules marked ADR have a decision record in `docs/adr/` that explains the
-reasoning. Those records do not exist yet; the numbers below are the planned ones.
+reasoning.
 
 | # | Rule | Why | Pinned by |
 |---|---|---|---|
 | 1 | Every dropped or degraded field is recorded through `warnf` (or `recordWarning` for the two ERROR-level drops). The one intended exception is `filterMetadata`, which drops OpenShift-managed labels and annotations at INFO. A direct `Log.Warn` for a drop is a review error | a warning that bypasses the list makes a lossy conversion look clean. This happened once, for every trigger type | `attribution_test.go` (`TestConvertSilentDropsAreRecorded`); the exception by `converter_test.go` (`TestConvertMetadataLabelsFiltersInternal`); otherwise convention and review. ADR-0003 |
 | 2 | The plugin never contacts a cluster. Image references resolve from flags or the documented fallback | the reason this plugin exists instead of the old `crane convert` | convention only. ADR-0001 |
 | 3 | One BuildConfig that cannot convert never aborts the crane run. `Run` returns no error for it; the object passes through annotated | crane aborts the whole migration on any plugin error | `outcome_test.go` (`TestRunDoesNotAbortOnConversionFailure`). ADR-0002 |
-| 4 | Steps 4 to 18 and their warnings run only on a BuildConfig that passed step 2, where Custom and JenkinsPipeline are skipped and an unknown strategy type or an unresolvable `from` image fails, and the output gate in step 3. Step 2 still runs before the gate; see the second ordering problem above | otherwise an unconverted BuildConfig gets false "field dropped" warnings | `postcommit_test.go` (`TestPostCommitSilentOnPassThroughPaths`) pins step 12; the rest is convention and review |
+| 4 | Steps 4 to 19 and their warnings run only on a BuildConfig that passed step 2, where Custom and JenkinsPipeline are skipped and an unknown strategy type or an unresolvable `from` image fails, and the output gate in step 3. Step 2 still runs before the gate; see the second ordering problem above | otherwise an unconverted BuildConfig gets false "field dropped" warnings | `postcommit_test.go` (`TestPostCommitSilentOnPassThroughPaths`) pins step 12; the rest is convention and review |
 | 5 | Strategy parameter names are a wire contract with the ClusterBuildStrategy. Renaming one without a matching catalog change drops the value on the cluster | Shipwright refuses to register a Build whose params it does not know | string assertions in `converter_test.go`; `tests/e2e-cluster.sh` checks `registered=True`. ADR-0004 |
 | 6 | Out-of-range or invalid values are warned about and dropped whole. Never clamped, never partly applied | clamping rewrites user intent silently | `converter_test.go` (retention), `nodeselector_test.go` |
 | 7 | Never emit a ServiceAccount with the same name as one the BuildConfig names | crane migrates that account separately; a same-named emit overwrites its pull secrets | `converter_test.go` (`TestNamedServiceAccountWithPullSecretIsNotGenerated`). ADR-0006 |
@@ -268,6 +271,7 @@ reasoning. Those records do not exist yet; the numbers below are the planned one
 | 13 | Triggers are preserved and warned about, never converted. The preservation annotation never carries webhook secrets | no trigger type works after migration today | `triggers_test.go`. ADR-0008 |
 | 14 | Never generate a volume for a source secret or ConfigMap | the Dockerfile also needs an edit the plugin cannot make; half the job produces builds that fail silently | `converter_test.go` (source secrets and ConfigMaps tests) |
 | 15 | A convertible BuildConfig always produces a Build. Degraded and warned, never blocked | the migration's job is to get resources onto the target and report gaps | `outcome_test.go` (`TestConvertOutcomeConvertedWithWarnings`) |
+| 16 | Chained builds are noticed per BuildConfig: a same-namespace `ImageStreamTag` input gets the run-order sentence on the warning that names it, or an info line that leaves the outcome `converted`. Never a cross-resource pass, never a Build trigger | crane runs the plugin once per resource, and a notice that reports no loss must not mark a clean conversion lossy | `chain_test.go` (`TestChainInfoForInputNoWarningNames`, `TestChainNoticeControls`). ADR-0009 |
 
 ## Where to add things
 
@@ -287,7 +291,7 @@ reasoning. Those records do not exist yet; the numbers below are the planned one
   annotations table above.
 - **A new build strategy.** Add a case to the switch in `Convert` and a handler like
   `processDockerStrategy`. The handler must set the strategy name before returning, because
-  steps 14 and 16 read it.
+  steps 14 and 17 read it.
 
 ## What keeps this page true
 

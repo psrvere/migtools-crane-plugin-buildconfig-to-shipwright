@@ -95,8 +95,8 @@ steps table in the architecture page if the pipeline order changed, and add a re
 ## Files you may own fully
 
 `main.go`, `tests/testdata/export/*`, `buildconfig/names.go`, `buildconfig/postcommit.go`,
-and `processRunPolicy`, the one conversion step that writes nothing to the Build. Propose
-and ship; the maintainer reads the result, not the diff.
+`buildconfig/chain.go`, and `processRunPolicy`: the two conversion steps that write nothing
+to the Build. Propose and ship; the maintainer reads the result, not the diff.
 
 Nothing else. In particular this list does not cover `hack/*` or `buildconfig/*_test.go`,
 because CI executes both: `.github/workflows/test-e2e-minikube-pr.yml` runs the `hack/`

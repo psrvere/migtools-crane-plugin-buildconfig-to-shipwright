@@ -153,8 +153,17 @@ func (c *Converter) processTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta
 			}
 			c.warnf("%s", msg)
 		case buildv1.ImageChangeBuildTriggerType:
-			c.warnf("BuildConfig %s: ImageChange trigger is dropped — builds will no longer start when %s changes. Shipwright has no equivalent of image change triggers today.",
-				bc.Name, imageChangeWatchedRef(bc, trigger.ImageChange))
+			from, explicit := imageChangeWatchedObject(bc, trigger.ImageChange)
+			msg := fmt.Sprintf("BuildConfig %s: ImageChange trigger is dropped — builds will no longer start when %s changes. Shipwright has no equivalent of image change triggers today.",
+				bc.Name, imageChangeWatchedRef(from, explicit))
+			// On OpenShift this trigger is how a chained build ran the consumer
+			// after the producer pushed. When the watched image is an
+			// ImageStreamTag in this namespace, say what replaces that
+			// ordering (BUILD-2326).
+			if from != nil && chainCandidate(string(from.Kind), from.Namespace, bc.Namespace) {
+				msg += fmt.Sprintf(chainRunOrderSentence, bc.Namespace)
+			}
+			c.warnf("%s", msg)
 		case buildv1.ConfigChangeBuildTriggerType:
 			// Checked at runtime rather than assumed, so there is no hard
 			// dependency on the BuildRun template (BUILD-2261): when the
@@ -184,28 +193,51 @@ func (c *Converter) processTriggers(bc *buildv1.BuildConfig, b *shipwrightv1beta
 // BuildConfig name and the canonical trigger type.
 const webhookTriggerWarning = "BuildConfig %s: %s webhook trigger is dropped — the old OpenShift webhook URL will stop working after migration, and Shipwright provides no replacement URL. Remove or repoint the webhook in your Git provider, then set up Pipelines-as-Code or Tekton Triggers to create BuildRuns on push events."
 
-// imageChangeWatchedRef names what an ImageChange trigger was watching: the
+// imageChangeWatchedObject returns what an ImageChange trigger watches: the
 // referenced ImageStreamTag, or the build strategy's From image when the
 // trigger has an empty From (only one such trigger is allowed per
-// BuildConfig, and it watches the strategy image).
-func imageChangeWatchedRef(bc *buildv1.BuildConfig, ict *buildv1.ImageChangeTrigger) string {
-	if ict != nil && ict.From != nil && ict.From.Name != "" {
-		ns := ict.From.Namespace
-		if ns == "" {
-			ns = bc.Namespace
-		}
-		return fmt.Sprintf("%s %s/%s", ict.From.Kind, ns, ict.From.Name)
-	}
-
+// BuildConfig, and it watches the strategy image). The namespace is defaulted
+// to the BuildConfig's and an empty kind to ImageStreamTag: a trigger's From
+// is always an ImageStreamTag (openshift/api), processSourceStrategy defaults
+// an empty Source strategy kind the same way, and a Docker strategy with an
+// empty kind fails conversion before triggers are read. Nil when neither
+// names an image. The second result reports whether the trigger named the
+// image itself rather than falling back to the strategy image; a nil trigger
+// therefore yields the strategy image.
+func imageChangeWatchedObject(bc *buildv1.BuildConfig, ict *buildv1.ImageChangeTrigger) (*corev1.ObjectReference, bool) {
 	var from *corev1.ObjectReference
+	explicit := ict != nil && ict.From != nil && ict.From.Name != ""
 	switch {
+	case explicit:
+		from = ict.From
 	case bc.Spec.Strategy.DockerStrategy != nil:
 		from = bc.Spec.Strategy.DockerStrategy.From
 	case bc.Spec.Strategy.SourceStrategy != nil:
 		from = &bc.Spec.Strategy.SourceStrategy.From
 	}
-	if from != nil && from.Name != "" {
+	if from == nil || from.Name == "" {
+		return nil, false
+	}
+	ref := *from
+	if ref.Namespace == "" {
+		ref.Namespace = bc.Namespace
+	}
+	if ref.Kind == "" {
+		ref.Kind = "ImageStreamTag"
+	}
+	return &ref, explicit
+}
+
+// imageChangeWatchedRef names what an ImageChange trigger was watching, for
+// the warning: "<Kind> <ns>/<name>" when the trigger named it, otherwise the
+// strategy image by name.
+func imageChangeWatchedRef(from *corev1.ObjectReference, explicit bool) string {
+	switch {
+	case from == nil:
+		return "the strategy image"
+	case explicit:
+		return fmt.Sprintf("%s %s/%s", from.Kind, from.Namespace, from.Name)
+	default:
 		return fmt.Sprintf("the strategy image %s", from.Name)
 	}
-	return "the strategy image"
 }

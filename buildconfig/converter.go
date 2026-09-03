@@ -224,6 +224,7 @@ func (c *Converter) Convert(bc *buildv1.BuildConfig) ([]unstructured.Unstructure
 	c.processBuildsHistoryLimits(bc, b)
 	c.addRegistries(b)
 	c.processTriggers(bc, b)
+	c.processChainCandidates(bc)
 
 	if err := c.processResources(bc, b, generatedSA); err != nil {
 		return nil, outcomeFailed(err.Error())
@@ -775,7 +776,14 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 	}
 
 	if sourceCount > 1 {
-		return fmt.Errorf("multiple source types are not supported in a single build in Shipwright (BuildConfig %s)", bc.Name)
+		msg := fmt.Sprintf("multiple source types are not supported in a single build in Shipwright (BuildConfig %s)", bc.Name)
+		if len(images) > 0 {
+			// A git source plus source.images is OpenShift's chained-build
+			// pattern; splitting the BuildConfig does not reproduce it
+			// (BUILD-2326).
+			msg += "; source.images alongside another source was OpenShift's chained-build pattern, which Shipwright expresses as a multi-stage Dockerfile: COPY --from=<image> the files you need and remove source.images"
+		}
+		return fmt.Errorf("%s", msg)
 	}
 
 	if sourceCount == 0 {
@@ -824,9 +832,6 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		if image.As != nil {
 			c.warnf("Image source 'As' field is not supported in Shipwright. BuildConfig: %s", bc.Name)
 		}
-		if image.Paths != nil {
-			c.warnf("Image source 'Paths' field is not supported in Shipwright. BuildConfig: %s", bc.Name)
-		}
 
 		namespace := image.From.Namespace
 		if namespace == "" {
@@ -838,6 +843,20 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		}
 		if warning != "" {
 			c.warnf("%s", warning)
+		}
+		if len(image.Paths) > 0 {
+			// Shipwright's OCI artifact source unpacks the image's flattened
+			// filesystem at the context root (shipwright/build
+			// pkg/bundle/bundle.go, mutate.Extract), so the selected paths do
+			// not land where the Dockerfile's COPY expects them. Name the
+			// resolved image so the multi-stage rewrite can be copied out of
+			// the warning (BUILD-2326).
+			msg := fmt.Sprintf("BuildConfig %s: source.images copied %d path(s) from %s into the build context on OpenShift. Shipwright's OCI artifact source unpacks the whole image filesystem at the context root and has no paths, so COPY instructions that expect those files under their destinationDir will not find them. Rewrite the Dockerfile as a multi-stage build (COPY --from=%s <sourcePath> <destination>) and remove source.images. Keep that Dockerfile in the git repository the Build clones (spec.source.git); a Build with neither git nor source.images has no source.",
+				bc.Name, len(image.Paths), imageRef, imageRef)
+			if chainCandidate(string(image.From.Kind), namespace, bc.Namespace) {
+				msg += fmt.Sprintf(chainRunOrderSentence, bc.Namespace)
+			}
+			c.warnf("%s", msg)
 		}
 
 		source := &shipwrightv1beta1.Source{
