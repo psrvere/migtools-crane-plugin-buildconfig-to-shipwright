@@ -149,6 +149,32 @@ after review". If the branch has several commits **and none is an already-finish
 `/tech-implement` commit you are preserving**, squash them (Step 6c, `git reset --soft
 main`) so one message matches the history. A single finished commit is left as-is.
 
+## Step 3b — Docs check (every mode)
+
+Runs in every mode, before anything is staged. Code that changed while no doc did is the
+case this step exists for: a branch that never went through `/tech-implement`, or a fix
+made after review.
+
+```bash
+CHANGED=$( { git -C "$WORK" diff --no-ext-diff --name-only "main...HEAD";
+             git -C "$WORK" diff --no-ext-diff --name-only HEAD; } | sort -u )
+CODE=$(printf '%s\n' "$CHANGED" | grep -E '^(buildconfig/.*\.go|main\.go|go\.mod|hack/.*\.sh|tests/.*\.sh|\.github/workflows/.*)$' | grep -vE '_test\.go$')
+DOCS=$(printf '%s\n' "$CHANGED" | grep -E '^(README\.md|AGENTS\.md|hack/README\.md|docs/.*\.md)$')
+```
+
+- `CODE` empty → nothing to check; go on.
+- `CODE` and `DOCS` both non-empty → docs moved with the code; go on. (Run `/tech-document`
+  by hand if you want a second opinion on whether they moved far enough.)
+- `CODE` non-empty, `DOCS` empty → say which code files changed, then ask once via
+  AskUserQuestion: **Run `/tech-document` now (Recommended)**, or **Skip** with a reason. On
+  run, invoke `/tech-document "$BRANCH" --work "$WORK"` yourself (it asks per proposal and
+  leaves its edits unstaged). Its edits are new work: Step 3's dirty-tree rule applies, so
+  they are staged and committed with the rest in Steps 5 and 6, squashed into a finished
+  `/tech-implement` commit under the amend-mode principle.
+
+Either way, carry the outcome (updated / none affected / skipped, with the reason) into the
+PR body's `## Docs` section and the Step 10 report.
+
 ## Step 4 — Create branch (new-PR mode, only when on `main`)
 
 If a Jira key exists, name the branch for the story
@@ -294,6 +320,10 @@ edit. The title matches the commit subject.
 - The tests actually run this session and their results
   (e.g. `GOWORK=off go test ./... -count=1` — pass/fail)
 
+## Docs
+- Updated: README.md › Plugin flags; docs/support-matrix.md › W63  (or: none affected — no
+  doc describes the changed behaviour; or: skipped — <reason>)
+
 ## Key design decisions
 - Notable choices made and why
 
@@ -306,7 +336,8 @@ Co-Authored-By: Claude
 Omit the `### Jira Issues` section and `Resolves:` line if there is no Jira. The
 `Co-Authored-By: Claude` line stays either way.
 Omit `## Testing` only if no tests were run this session (say so instead of
-faking results).
+faking results). `## Docs` stays in every PR body: "none affected" is a result, and a
+reviewer who does not see the line cannot tell it from a pass that never ran.
 
 **New-PR mode:**
 
@@ -408,4 +439,5 @@ Print:
 > - **Branch:** `<branch>`
 > - **Commit:** `<short-sha>`
 > - **Mode:** New PR / Amended
+> - **Docs:** updated (README.md, docs/support-matrix.md) / none affected / skipped: <reason>
 > - **Jira:** BUILD-XXXX — linked, commented, assigned, sprint, Review (or "none")

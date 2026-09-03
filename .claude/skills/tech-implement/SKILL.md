@@ -318,6 +318,14 @@ and it will only surface as a suite failure later.
 2. **Crane Plugin Repo second** — the conversion logic in `buildconfig/`.
 3. **Unit tests third.**
 4. **Run them**: `GOWORK=off go test ./... -count=1`.
+5. **Docs, in the same commit.** Once the tests pass, invoke `/tech-document BUILD-XXXX --work "$WT"`
+   yourself, at the orchestrator level: it asks the user which proposals to apply, so it
+   cannot run as a sub-agent. It maps the diff to the docs it touches (README, `AGENTS.md`,
+   `hack/README.md`, `docs/`), shows each proposed edit next to the code line that caused
+   it, and applies what the user approves, unstaged, in `$WT`. Paste its Docs record into
+   the results file under a `## Docs` heading. `NONE AFFECTED` is a valid outcome and is
+   recorded with its evidence; a results file with no Docs record means the pass did not
+   run.
 
 `compound-engineering:ce-work` is available for execution.
 
@@ -363,8 +371,9 @@ git -C "$WT" branch --show-current        # must equal BUILD-XXXX-<slug>
 git -C "$WT" commit --only -s -S -m "[BUILD-XXXX] <type>: <subject>" -- buildconfig/converter.go buildconfig/converter_test.go
 ```
 
-   List every path literally. zsh does not word-split a variable, so a path list held in one
-   shell variable arrives as a single argument and fails.
+   List every path literally, including the docs `/tech-document` handed back in Phase 3 (its
+   Docs record names them; they are unstaged in `$WT`). zsh does not word-split a variable,
+   so a path list held in one shell variable arrives as a single argument and fails.
 
    Convention: `[BUILD-XXXX] <type>: <subject>`, where type is `feat`, `fix`, `test`,
    `docs`, or `chore`. `-s` adds the DCO sign-off (required by `AGENTS.md`). `-S` GPG-signs;
@@ -450,6 +459,8 @@ Tests:
   - Unit:    X/Y passed — results: test-results/BUILD-XXXX-results.md @ <HEAD SHA>
   - Cluster: <PASS/FAIL/N-A> — evidence: <section of the results file>
 
+Docs:    <n files updated: README.md, docs/support-matrix.md | none affected> — record: test-results/BUILD-XXXX-results.md § Docs
+
 Jira:    not touched by this skill — /create-pr updates it
 PR:      not created yet — run /create-pr
 ```
@@ -488,6 +499,7 @@ committed, tested, review-ready branch plus the offer to run `/tech-review`.
 | 0 branch precondition | ✅ / ❌ | `for-each-ref` output |
 | 0 worktree isolation | ✅ / ❌ | worktree path |
 | 3 implement + unit tests | ✅ / ❌ | results file path |
+| 3 docs (`/tech-document`) | ✅ updated / ✅ NONE AFFECTED / ❌ | Docs record in the results file; files named in the commit |
 | 4 review | ✅ / ⏭️ SKIPPED (reason) | |
 | 5 /tech-test | ✅ / ⏭️ SKIPPED (reason) | |
 | 6 commit + rebase (no push) | ✅ / ❌ | ahead/behind vs origin/main; `show --name-only` output |

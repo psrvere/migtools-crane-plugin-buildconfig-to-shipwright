@@ -317,9 +317,9 @@ is *just a bash tool* (the CLI reviewers) runs fine wrapped in a sub-agent. A re
 sub-agent at all where the harness disables model invocation for sub-agents (`/code-review`
 returned exactly this in practice — "cannot be invoked via Skill tool
 (disable-model-invocation)"), and `ce-code-review` additionally fans out and returns before
-its children finish. So the rule is: **the two Skill-backed reviewers, `/code-review` and
-`ce-code-review`, run at the orchestrator level; only the CLI reviewers are dispatched as
-sub-agents.** (`/simplify`, also Skill-backed, is already orchestrator-level in Stage 2.)
+its children finish. So the rule is: **the three Skill-backed reviewers, `/code-review`,
+`ce-code-review`, and `/tech-document`, run at the orchestrator level; only the CLI reviewers
+are dispatched as sub-agents.** (`/simplify`, also Skill-backed, is already orchestrator-level in Stage 2.)
 
 | Reviewer | How to run | Prompt / instructions | When |
 |---|---|---|---|
@@ -327,8 +327,19 @@ sub-agents.** (`/simplify`, also Skill-backed, is already orchestrator-level in 
 | `cli-review` (qodo) | **sub-agent** | `reviewers/cli-review.md` | `qodo` on PATH and not excluded by `--cli` |
 | `code-review` | **orchestrator-level** (invoke `/code-review` yourself) | `reviewers/code-review.md` | Always |
 | `ce-code-review` | **orchestrator-level** (invoke the Skill yourself) | `reviewers/ce-code-review.md` | Escalation threshold met — see below |
+| `tech-document` | **orchestrator-level** (invoke `/tech-document "$BRANCH" --report --work "$WT"` yourself) | its own `--report` contract | Always |
 
-Dispatch the **CLI sub-agents in one message** so they run in parallel; run the two
+`/tech-document` maps the branch diff to the docs it touches, runs the documentation tests, and
+writes findings in the `findings-schema.md` shape with `source: tech-document`. It writes to
+its own scratch and returns the path on one line; copy that file to `$SCRATCH/tech-document.json`
+so Stage 6 reads it with the others. Running it here rather than in Stage 5 puts its
+findings through the same pipeline as every reviewer's: a red documentation test arrives as
+a `blocker` and the Stage 4 challenger confirms it by running the named test; stale prose
+arrives as a `warning`; a sentence already wrong on `$BASE` is scoped `pre-existing` and
+never blocks. `/tech-document` ships in this repo, so it is never `unavailable`; if it returns
+`BLOCKED` or nothing, record it as `failed`.
+
+Dispatch the **CLI sub-agents in one message** so they run in parallel; run the
 orchestrator-level reviewers yourself alongside them. Each writes its findings JSON to
 `$SCRATCH` and (for sub-agents) returns only a count.
 
@@ -343,6 +354,7 @@ For the **CLI sub-agents**, read the file's body and pass it as the sub-agent pr
 For the **orchestrator-level reviewers**, read `reviewers/code-review.md` and
 `reviewers/ce-code-review.md` as your *own* instructions: invoke the Skill directly with the
 working directory set to `$WT`, block on it, and map its findings into the schema yourself.
+`/tech-document --report` writes the schema itself; only the copy into `$SCRATCH` is yours.
 Map the `model:` field in each sub-agent file's frontmatter to the Agent tool's `model`
 parameter.
 
@@ -407,7 +419,9 @@ with their source named.
 
 ## Stage 5: Cross-repo checks
 
-Five checks, plain bash, no sub-agent. This is the part no general reviewer performs.
+Six checks. 5a to 5e are plain bash with no sub-agent; 5f is the accounting line for the
+`tech-document` reviewer that already ran in Stage 3. This is the part no general reviewer
+performs.
 
 ### 5a. Parameter consistency
 
@@ -474,6 +488,15 @@ repos that actually changed. A mismatch is scope drift: report it as a **blocker
 cap the verdict until either the code or the doc is reconciled.
 
 No design doc means SKIPPED, not a finding.
+
+### 5f. Docs currency
+
+The `tech-document` reviewer ran in Stage 3 and its findings went through Stage 4 with the
+rest. Here, confirm in the compliance table that it ran and that `$SCRATCH/tech-document.json`
+exists with `status: ok`; anything else is `failed`, named in the report. `--fix`
+(Stage 7) treats its findings as mechanical: the `detail` field carries the replacement
+text. Apply the approved ones in `$WT` and re-run the documentation tests. Its post-PR
+counterpart is `/deep-review`'s `docs-currency` reviewer.
 
 ---
 
@@ -564,7 +587,7 @@ Emit this every run, including when stopping early for any reason.
 | 2. Simplify         | DONE / REVERTED / UNAVAILABLE | tests result |
 | 3. Reviewers        | DONE / partial | which ran, which were absent |
 | 4. Challenger       | DONE / SKIPPED | no blockers |
-| 5. Cross-repo 5a-5e | DONE / partial | each sub-check accounted for |
+| 5. Cross-repo 5a-5f | DONE / partial | each sub-check accounted for |
 | 6. Verdict          | DONE | |
 Overall: COMPLETE / INCOMPLETE
 ```
@@ -619,6 +642,7 @@ Do not commit and do not write to the user's checkout. Committing is the caller'
 | A sub-agent returns nothing | Treat as `failed`, name it, do not report a clean result |
 | No design doc | Check 5e SKIPPED, not a finding |
 | No test evidence | `EVIDENCE: none`, no clean `READY` |
+| `/tech-document` returns `BLOCKED` or nothing | Check 5f `failed`, named in the report; never a clean result |
 
 ## Notes
 
