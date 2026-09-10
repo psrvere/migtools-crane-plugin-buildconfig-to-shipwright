@@ -21,9 +21,7 @@ spec:
     image: quay.io/myorg/buildconfig-test/ruby-hello-world:latest
     pushSecret: quay-push
   paramValues:
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   source:
     git:
