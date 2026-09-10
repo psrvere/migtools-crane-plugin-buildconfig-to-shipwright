@@ -296,7 +296,7 @@ print_summary() {
     log "      git:"
     log "        url: https://github.com/shipwright-io/sample-go"
     log "    strategy:"
-    log "      name: buildah"
+    log "      name: buildah-strategy-managed-push"
     log "      kind: ClusterBuildStrategy"
     log "    paramValues:"
     log "    - name: registries-insecure"
@@ -307,6 +307,15 @@ print_summary() {
     log "  EOF"
     log ""
     log "Note: registries-insecure parameter is required for HTTP registry"
+    log ""
+    log "These are upstream Shipwright's sample strategies. There is no ClusterBuildStrategy"
+    log "called 'buildah' here; that name belongs to strategy-catalog, which the Builds for"
+    log "Red Hat OpenShift operator installs, and it is what the plugin writes by default."
+    log "So on this cluster, transform with an override:"
+    log "  crane transform --optional-flags '{\"default-build-strategy\":\"docker=buildah-strategy-managed-push\"}'"
+    log "The Build will register, but a BuildConfig using no-cache, squash, pull or"
+    log "runtime-stage-from still fails: upstream's strategies do not declare those params."
+    log "See docs/adr/0010-strategy-names-target-the-red-hat-catalog.md."
 }
 
 main() {

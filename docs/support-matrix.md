@@ -84,10 +84,10 @@ Either way the BuildConfig itself stays exactly as it was.
 
 | Field | What happens | Where it lands | What you do by hand | Warning |
 |---|---|---|---|---|
-| `strategy.type: Docker` | Converted | `spec.strategy: {kind: ClusterBuildStrategy, name: buildah}`. The name changes with `--default-build-strategy docker=…` | Make sure the `buildah` ClusterBuildStrategy exists on the target | none |
-| `strategy.type: Source` | Converted | `spec.strategy: {kind: ClusterBuildStrategy, name: source-to-image}`. The name changes with `--default-build-strategy s2i=…` | Make sure the `source-to-image` ClusterBuildStrategy exists on the target | none |
-| `strategy.type: Custom`, `JenkinsPipeline`, empty, unknown | Skipped or failed | | See [What stops a BuildConfig from converting](#what-stops-a-buildconfig-from-converting) | No ClusterBuildStrategy can take these. [W4](#w4), [W5](#w5), [W6](#w6) |
-| `dockerStrategy.pullSecret` or `sourceStrategy.pullSecret`, with `spec.serviceAccount` also set | Dropped. The plugin does not touch a named ServiceAccount | | Link the secret to that ServiceAccount on the target: `oc -n <ns> secrets link <sa> <secret> --for=pull,mount` | The plugin never edits an account you own. [W8](#w8) |
+| `strategy.type: Docker` | Converted | `spec.strategy: {kind: ClusterBuildStrategy, name: buildah}`, a strategy-catalog name. The name changes with `--default-build-strategy docker=…` | Make sure the `buildah` ClusterBuildStrategy exists on the target. The Builds for Red Hat OpenShift operator installs it; upstream Shipwright has no strategy by that name (ADR-0010) | none |
+| `strategy.type: Source` | Converted | `spec.strategy: {kind: ClusterBuildStrategy, name: source-to-image}`, a strategy-catalog name. The name changes with `--default-build-strategy s2i=…` | Make sure the `source-to-image` ClusterBuildStrategy exists on the target. Upstream Shipwright has one under that name, but it is a different strategy: kaniko-based, one parameter (ADR-0010) | none |
+| `strategy.type: Custom`, `JenkinsPipeline`, empty, unknown | Skipped or failed | | See [What stops a BuildConfig from converting](#what-stops-a-buildconfig-from-converting) | [W4](#w4), [W5](#w5), [W6](#w6) |
+| `dockerStrategy.pullSecret` or `sourceStrategy.pullSecret`, with `spec.serviceAccount` also set | Dropped. The plugin does not touch a named ServiceAccount | | Link the secret to that ServiceAccount on the target: `oc -n <ns> secrets link <sa> <secret> --for=pull,mount` | [W8](#w8) |
 | `dockerStrategy.pullSecret` or `sourceStrategy.pullSecret`, no `spec.serviceAccount` | Converted. A new ServiceAccount carrying the secret is generated | a `ServiceAccount` named after the BuildConfig, listed in both `imagePullSecrets` and `secrets`. The BuildRun template, if any, names it | Migrate the secret itself; the plugin only references it | none |
 | `spec.serviceAccount` | Converted, with a warning. The name is carried only into the BuildRun template, if one is generated | `spec.serviceAccount` of the BuildRun template | Recreate the account's secrets, image pull secrets and role bindings on the target | Only the name travels. The account's bindings stay on the source cluster. [W9](#w9) |
 
@@ -125,6 +125,12 @@ Either way the BuildConfig itself stays exactly as it was.
 | `sourceStrategy.env[]` | Converted | `spec.env[]` | Nothing | none |
 
 ### Strategy parameters
+
+The strategy name and the params the plugin writes are one unit. `buildah` and
+`source-to-image` are strategy-catalog names, and the catalog is the target: the plugin's
+params are the ones those two declare. Upstream Shipwright declares a smaller set under
+different names, so `--default-build-strategy` does not make a converted Build work there. It
+names a copy of a catalog strategy. ADR-0010 has the full comparison.
 
 The three S2I params above, `scripts-url`, `incremental` and `pull-policy`, exist only on a
 `source-to-image` strategy that declares them. Builds for Red Hat OpenShift 1.9 (operator
@@ -295,7 +301,7 @@ More than one `source.images` entry fails the conversion and the error names the
 |---|---|---|
 | `--imagestream-mapping` | `ns/name:tag=registry/image:tag,…` | Replaces ImageStream references, and bare DockerImage names, with a concrete image |
 | `--registry-mapping` | `old-registry=new-registry,…` | Rewrites the registry prefix of every resolved image reference, except an output image whose kind is not `ImageStreamTag`, which is copied as written (see [Output](#output)). The longest matching prefix wins |
-| `--default-build-strategy` | `docker=name,s2i=name` | Uses a different ClusterBuildStrategy name. With a custom name the BuildRun template omits `stepResources` ([W47](#w47)) |
+| `--default-build-strategy` | `docker=name,s2i=name` | Names a copy of a catalog strategy, not an upstream Shipwright one (ADR-0010). With a custom name the BuildRun template omits `stepResources` ([W47](#w47)) |
 | `--search-registries` | `registry,…` | `spec.paramValues[registries-search]` |
 | `--insecure-registries` | `registry,…` | Keyed on the strategy name written to the Build, not on the BuildConfig's strategy type. `source-to-image`: `spec.output.insecure: true` when the output image is on one of them. Any other name, including a `--default-build-strategy` override for S2I: `spec.paramValues[registries-insecure]` |
 | `--block-registries` | `registry,…` | `spec.paramValues[registries-block]` |

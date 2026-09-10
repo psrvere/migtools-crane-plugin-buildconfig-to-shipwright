@@ -21,6 +21,12 @@ import (
 )
 
 const (
+	// The two strategy names are strategy-catalog names, installed by the
+	// Builds for Red Hat OpenShift operator. That catalog is the plugin's
+	// target: it declares every param the converter writes. Upstream
+	// Shipwright ships neither name for Docker nor the same params for S2I,
+	// so it is not a supported target and --default-build-strategy does not
+	// make it one; it names a copy of a catalog strategy (ADR-0010).
 	defaultDockerStrategy = "buildah"
 	defaultS2IStrategy    = "source-to-image"
 

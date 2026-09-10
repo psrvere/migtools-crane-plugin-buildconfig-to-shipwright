@@ -22,6 +22,26 @@ This directory contains scripts for setting up development and E2E testing envir
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [minikube](https://minikube.sigs.k8s.io/docs/start/)
 
+## Strategy names on a Minikube cluster
+
+`setup-minikube-shipwright.sh` installs upstream Shipwright's sample strategies. They are not
+the ones the plugin targets: it writes `buildah` and `source-to-image` from
+[strategy-catalog](https://github.com/redhat-openshift-builds/strategy-catalog), which the
+Builds for Red Hat OpenShift operator installs, and upstream has no `buildah` at all. A Build
+converted with the defaults lands here with `BuildRegistrationFailed`.
+
+Pass an override to test on Minikube, which is what the cluster test cases do in their own
+`OPTIONAL_FLAGS`:
+
+```bash
+crane transform --optional-flags '{"default-build-strategy":"docker=buildah-strategy-managed-push"}'
+```
+
+That gets the Build registered. It does not make upstream a supported target: its strategies
+declare fewer parameters, so a BuildConfig using `no-cache`, `squash`, `pull` or
+`runtime-stage-from` still fails on the params. See
+[ADR-0010](../docs/adr/0010-strategy-names-target-the-red-hat-catalog.md).
+
 ## Quick Start
 
 ```bash
@@ -33,7 +53,8 @@ This directory contains scripts for setting up development and E2E testing envir
 # - Kubectl context "minikube-shipwright"
 # - Tekton Pipelines (required by Shipwright)
 # - Shipwright Build v0.19.0
-# - Default ClusterBuildStrategies (buildah, source-to-image, etc.)
+# - Upstream Shipwright's sample ClusterBuildStrategies
+#   (buildah-strategy-managed-push, source-to-image, kaniko, ko, ...)
 # - Local registry addon
 ```
 
