@@ -27,8 +27,8 @@ jobs:
         env:
           GOPROXY: "https://proxy.golang.org"
         run: |
-          go build -o crane-plugin-buildconfig-to-shipwright .
-          chmod +x crane-plugin-buildconfig-to-shipwright
+          go build -o crane-plugin-buildconfig-to-builds .
+          chmod +x crane-plugin-buildconfig-to-builds
 
       - name: Install crane CLI
         run: |

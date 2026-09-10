@@ -63,7 +63,7 @@ honour it — **except** where these overrides say otherwise.
 
 ### O3. Report-only by default — posting requires `--post` AND confirmation
 
-This repo's `origin` is the shared upstream `migtools/crane-plugin-buildconfig-to-shipwright`.
+This repo's `origin` is the shared upstream `migtools/crane-plugin-buildconfig-to-builds`.
 Posting a review is an outward-facing action against someone else's PR.
 
 - **Default (no `--post`):** print the full review to the terminal. Post
@@ -168,9 +168,9 @@ Read `$(git rev-parse --show-toplevel)/AGENTS.md` and include it, then add this
 verbatim block:
 
 ```markdown
-### Repo invariants (migtools/crane-plugin-buildconfig-to-shipwright)
+### Repo invariants (migtools/crane-plugin-buildconfig-to-builds)
 
-- Go module `github.com/migtools/crane-plugin-buildconfig-to-shipwright`.
+- Go module `github.com/migtools/crane-plugin-buildconfig-to-builds`.
 - **CI parity:** CI builds this module standalone. The local `go.work` resolves
   dependencies across sibling modules and hides breakage. The authoritative
   check is `GOWORK=off go test ./... -count=1`. A finding that only reproduces

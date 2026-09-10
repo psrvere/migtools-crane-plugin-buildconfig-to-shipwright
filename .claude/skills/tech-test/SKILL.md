@@ -650,7 +650,7 @@ resolution off.
 
 ```bash
 cd "$WT"                                   # the U2 worktree, or a fresh one on the branch
-GOWORK=off go build -o "$PLUGIN_DIR/crane-plugin-buildconfig-to-shipwright" .
+GOWORK=off go build -o "$PLUGIN_DIR/crane-plugin-buildconfig-to-builds" .
 ```
 
 **Step 1 — ImageStream, then BuildConfig.** Apply the ImageStream the BuildConfig output

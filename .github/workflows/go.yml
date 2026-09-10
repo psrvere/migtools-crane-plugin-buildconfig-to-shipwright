@@ -35,13 +35,13 @@ jobs:
       - name: Build plugin binary
         env:
           GOPROXY: "https://proxy.golang.org"
-        run: go build -o crane-plugin-buildconfig-to-shipwright .
+        run: go build -o crane-plugin-buildconfig-to-builds .
 
       - name: Upload plugin binary
         uses: actions/upload-artifact@v4
         with:
-          name: crane-plugin-buildconfig-to-shipwright
-          path: crane-plugin-buildconfig-to-shipwright
+          name: crane-plugin-buildconfig-to-builds
+          path: crane-plugin-buildconfig-to-builds
           retention-days: 30
 
       - name: Unit tests with coverage

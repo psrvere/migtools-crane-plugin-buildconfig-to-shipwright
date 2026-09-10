@@ -80,5 +80,5 @@ Work with a story on the board. Nothing here has a release date.
 
 | BuildConfig feature | What happens today | Planned change | Tracking |
 |---|---|---|---|
-| `mountTrustedCA` | dropped, no warning | A `trusted-ca` volume on the Build and a ConfigMap the cluster fills with the CA bundle | BUILD-2265, [PR #23](https://github.com/migtools/crane-plugin-buildconfig-to-shipwright/pull/23) in review |
+| `mountTrustedCA` | dropped, no warning | A `trusted-ca` volume on the Build and a ConfigMap the cluster fills with the CA bundle | BUILD-2265, [PR #23](https://github.com/migtools/crane-plugin-buildconfig-to-builds/pull/23) in review |
 | `serviceAccount` with its secrets and role bindings | crane migrates the account object. The plugin carries the name into the BuildRun template and warns you to verify the rest | Migrate the account's secrets, image pull secrets and RBAC with it | BUILD-2402 |

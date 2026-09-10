@@ -63,8 +63,8 @@ crane version
 ### Build the plugin
 
 ```bash
-GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-shipwright .
-mkdir -p plugins && mv crane-plugin-buildconfig-to-shipwright plugins/
+GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-builds .
+mkdir -p plugins && mv crane-plugin-buildconfig-to-builds plugins/
 ```
 
 crane finds plugins by scanning the directory passed as `--plugin-dir`.

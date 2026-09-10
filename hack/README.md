@@ -114,8 +114,8 @@ After setting up your environment, test the crane plugin.
 ### 1. Build the Plugin
 
 ```bash
-cd /path/to/crane-plugin-buildconfig-to-shipwright
-go build -o crane-plugin-buildconfig-to-shipwright .
+cd /path/to/crane-plugin-buildconfig-to-builds
+go build -o crane-plugin-buildconfig-to-builds .
 ```
 
 ### 2. Run E2E Transform Test
@@ -147,7 +147,7 @@ The manual steps below are for custom, one-off testing.
 kubectl config use-context minikube-shipwright
 
 # Build plugin
-go build -o /tmp/plugins/crane-plugin-buildconfig-to-shipwright .
+go build -o /tmp/plugins/crane-plugin-buildconfig-to-builds .
 
 # Transform test data
 crane transform \

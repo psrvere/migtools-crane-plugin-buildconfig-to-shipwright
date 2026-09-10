@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/migtools/crane-plugin-buildconfig-to-shipwright/buildconfig"
+	"github.com/migtools/crane-plugin-buildconfig-to-builds/buildconfig"
 
 	"github.com/konveyor/crane-lib/transform/cli"
 	"github.com/sirupsen/logrus"

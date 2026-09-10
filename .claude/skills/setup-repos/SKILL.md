@@ -29,7 +29,7 @@ The user invoked this with: $ARGUMENTS
 | Strategy Catalog Repo | `redhat-openshift-builds/strategy-catalog` | yes |
 | Downstream Operator Repo | `redhat-openshift-builds/operator` | yes |
 | Downstream OpenShift Builds Repo | `redhat-openshift-builds/shipwright-io` | no |
-| Crane Plugin Repo | `migtools/crane-plugin-buildconfig-to-shipwright` | yes |
+| Crane Plugin Repo | `migtools/crane-plugin-buildconfig-to-builds` | yes |
 | Crane Repo | `migtools/crane` | no |
 | Crane Lib Repo | `migtools/crane-lib` | no — legacy, read-only |
 
@@ -127,7 +127,7 @@ Match each remote against the table above. Handle HTTPS and SSH forms, with or w
 and `https://github.com/migtools/crane.git` are the same repo.
 
 Match on the **full** `org/repo` tail, never the bare repo name. `migtools/crane` and
-`migtools/crane-lib` and `migtools/crane-plugin-buildconfig-to-shipwright` all begin with
+`migtools/crane-lib` and `migtools/crane-plugin-buildconfig-to-builds` all begin with
 `crane`; a prefix match assigns the wrong path.
 
 If two clones match one label, show both and ask which to use. Never guess.

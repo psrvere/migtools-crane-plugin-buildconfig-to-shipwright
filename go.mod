@@ -1,4 +1,4 @@
-module github.com/migtools/crane-plugin-buildconfig-to-shipwright
+module github.com/migtools/crane-plugin-buildconfig-to-builds
 
 go 1.25.6
 

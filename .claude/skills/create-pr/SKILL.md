@@ -9,7 +9,7 @@ user_invocable: true
 # /create-pr — Commit, Push, and Open PRs
 
 Commit, push, and create (or amend) a pull request for
-`crane-plugin-buildconfig-to-shipwright`, and optionally update the linked Jira
+`crane-plugin-buildconfig-to-builds`, and optionally update the linked Jira
 story.
 
 ## Repo Conventions (hardcoded)

@@ -80,12 +80,12 @@ cd "$PROJECT_DIR"
 # GOWORK=off matches what CI builds, and is required when this checkout is a git
 # worktree nested inside the parent module — the workspace otherwise resolves the
 # worktree path as a subpackage of the parent and the build fails.
-GOWORK=off GOTOOLCHAIN=auto go build -o "$PLUGIN_DIR/crane-plugin-buildconfig-to-shipwright" .
-echo "  Built: $PLUGIN_DIR/crane-plugin-buildconfig-to-shipwright"
+GOWORK=off GOTOOLCHAIN=auto go build -o "$PLUGIN_DIR/crane-plugin-buildconfig-to-builds" .
+echo "  Built: $PLUGIN_DIR/crane-plugin-buildconfig-to-builds"
 
 # --- Verify plugin metadata ---
 log "Testing plugin metadata"
-METADATA=$(echo '{}' | "$PLUGIN_DIR/crane-plugin-buildconfig-to-shipwright")
+METADATA=$(echo '{}' | "$PLUGIN_DIR/crane-plugin-buildconfig-to-builds")
 check 'echo "$METADATA" | grep -q "BuildConfigToBuildsPlugin"' "metadata returns plugin name"
 check 'echo "$METADATA" | grep -q "registry-mapping"' "metadata lists registry-mapping flag"
 check 'echo "$METADATA" | grep -q "imagestream-mapping"' "metadata lists imagestream-mapping flag"

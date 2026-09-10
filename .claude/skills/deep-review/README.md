@@ -1,6 +1,6 @@
 # deep-review
 
-Multi-agent pull request review for `crane-plugin-buildconfig-to-shipwright`.
+Multi-agent pull request review for `crane-plugin-buildconfig-to-builds`.
 
 One orchestrator triages the PR, fans out to up to six specialised reviewer
 sub-agents **in parallel**, runs an adversarial "challenger" pass that deletes
@@ -43,10 +43,10 @@ tree. It is not a pre-push tool.
 Run from **inside the plugin repo** so the skill is discoverable.
 
 ```bash
-cd ~/Desktop/work-repos/migtools/crane-plugin-buildconfig-to-shipwright
+cd ~/Desktop/work-repos/migtools/crane-plugin-buildconfig-to-builds
 
 /deep-review 24                                  # by PR number
-/deep-review https://github.com/migtools/crane-plugin-buildconfig-to-shipwright/pull/24
+/deep-review https://github.com/migtools/crane-plugin-buildconfig-to-builds/pull/24
 /deep-review 24 --only=correctness               # one sub-agent — cheap smoke test
 /deep-review 24 --only=correctness,security      # subset
 /deep-review 24 --post                           # post to GitHub (asks first)
@@ -68,7 +68,7 @@ cd ~/Desktop/work-repos/migtools/crane-plugin-buildconfig-to-shipwright
 ### Safety behaviour you should know about
 
 - **Report-only is the default.** `origin` is the shared upstream
-  `migtools/crane-plugin-buildconfig-to-shipwright`; posting a review there is
+  `migtools/crane-plugin-buildconfig-to-builds`; posting a review there is
   an outward-facing act, so it requires `--post` *and* a confirmation prompt.
 - **Protected paths can never be approved.** If the PR touches `.claude/`,
   `.github/`, `AGENTS.md`, `CLAUDE.md`, `Makefile`, `go.mod`, `go.sum`, or
@@ -158,7 +158,7 @@ the entire point of the layout — see §7.
 
 ## 5. Prerequisites
 
-- `gh` authenticated with read access to `migtools/crane-plugin-buildconfig-to-shipwright`
+- `gh` authenticated with read access to `migtools/crane-plugin-buildconfig-to-builds`
 - `curl`, `shasum`, `awk` (macOS/Linux defaults)
 - Claude Code, run from the repo root
 

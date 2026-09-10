@@ -5,7 +5,7 @@
 # WARNING: This only installs the CRD schema - it does NOT provide actual BuildConfig
 # functionality. BuildConfigs created with this CRD will not trigger any builds.
 #
-# This is purely for testing crane-plugin-buildconfig-to-shipwright transformation
+# This is purely for testing crane-plugin-buildconfig-to-builds transformation
 # on clusters that don't have the native OpenShift BuildConfig resource type.
 #
 # Usage:
@@ -155,7 +155,7 @@ print_usage_example() {
   YAML
 
 EOF
-    log "Then transform with crane-plugin-buildconfig-to-shipwright"
+    log "Then transform with crane-plugin-buildconfig-to-builds"
 }
 
 main() {

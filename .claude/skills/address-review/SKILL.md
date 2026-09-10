@@ -392,7 +392,7 @@ Addressed 6 of 6 items on PR #66.
 Fixed 4, answered 2, pushed back 1, left open 1 (thread 2, aufi), skipped 1 boilerplate.
 Commit 5942f41 pushed to fork. Tests: GOWORK=off go test passed.
 Challenger: 1 confirmed, 0 flipped.
-https://github.com/migtools/crane-plugin-buildconfig-to-shipwright/pull/66
+https://github.com/migtools/crane-plugin-buildconfig-to-builds/pull/66
 ```
 
 Add a line for anything skipped or failed: "Stage 5 skipped, prose-only changes",
