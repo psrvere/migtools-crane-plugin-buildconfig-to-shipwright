@@ -39,14 +39,12 @@ complete list. The full list, field by field, is in [docs/support-matrix.md](doc
 
 ## Prerequisites
 
-- **crane TBD-CRANE-VERSION or newer.** This plugin is compiled into it, so there is one
-  binary to install and nothing to build.
+- **crane v0.11.0-alpha.1 or newer**, with this plugin installed into it. crane ships with
+  no plugins of its own; `crane plugin-manager` fetches them. Both steps are below, and
+  neither needs a Go toolchain.
 - **A target cluster with Shipwright and Tekton**, and the `buildah` and `source-to-image`
-  ClusterBuildStrategies. Builds for Red Hat OpenShift ships both, generated from
-  [strategy-catalog](https://github.com/redhat-openshift-builds/strategy-catalog). Which
-  version of them you have decides whether the params the plugin writes are declared: a
-  Build carrying a param its strategy does not know lands with `Registered=False`, reason
-  `UndefinedParameter`. Upstream, CI tests against Shipwright v0.19.0.
+  ClusterBuildStrategies. Builds for Red Hat OpenShift ships both. Upstream, CI tests
+  against Shipwright v0.19.0.
 
 ### Install crane
 
@@ -54,7 +52,7 @@ Take the binary for your platform from the [releases
 page](https://github.com/migtools/crane/releases):
 
 ```bash
-CRANE_VERSION=TBD-CRANE-VERSION
+CRANE_VERSION=v0.11.0-alpha.1
 curl -Lo crane "https://github.com/migtools/crane/releases/download/${CRANE_VERSION}/crane_linux_amd64"
 chmod +x crane
 sudo mv crane /usr/local/bin/
@@ -64,6 +62,21 @@ crane version
 Assets are named `crane_<os>_<arch>`, so `crane_darwin_arm64`, `crane_linux_arm64` and
 `crane_windows_amd64.exe` are there too, and `checksums.txt` on the same release verifies
 them.
+
+### Install the plugin
+
+crane keeps a plugin index at
+[migtools/crane-plugins](https://github.com/migtools/crane-plugins). `plugin-manager` reads
+it and downloads the released binary for your platform:
+
+```bash
+crane plugin-manager add BuildConfigToBuildsPlugin
+crane plugin-manager list
+```
+
+The binary lands in `$HOME/.local/share/crane/plugins`, which is where `crane transform`
+looks unless told otherwise, so no `--plugin-dir` is needed below. `--global` installs to
+`/usr/local/share/crane/plugins` for every user on the machine instead.
 
 Working on the plugin rather than using it means building crane and the plugin from source.
 That is in [hack/README.md](hack/README.md).
@@ -79,16 +92,18 @@ crane export -n myapp
 ### 2. Transform
 
 ```bash
-crane transform \
+crane transform KubernetesPlugin BuildConfigToBuildsPlugin \
   --optional-flags '{"registry-mapping":"image-registry.openshift-image-registry.svc:5000=quay.io/myorg"}'
 ```
 
-Naming no stage runs every stage crane found, which is this plugin and the built-in
-`KubernetesPlugin` that strips `uid`, `resourceVersion` and `status`. Those fields stop a
-resource applying to a different cluster, so leave that stage in.
+Name both stages. `BuildConfigToBuildsPlugin` is this plugin. `KubernetesPlugin` is crane's
+built-in one, which strips `uid`, `resourceVersion` and `status`; those fields stop a
+resource applying to a different cluster, so leave it in. Naming stages runs those two and
+nothing else, which keeps any other plugin you have installed out of this migration.
 
 `--optional-flags` takes one JSON object whose keys are the plugin's flags and whose values
-are strings. The flags are listed [below](#plugin-flags); `crane transform optionals` prints
+are strings. It reaches every stage that runs, and a stage ignores a key it does not
+declare. The flags are listed [below](#plugin-flags); `crane transform optionals` prints
 them with an example each.
 
 ### 3. Write the output, then read it

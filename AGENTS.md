@@ -159,7 +159,8 @@ not exist on `main` yet. They are listed here so the table is complete when thos
   `NewResources` landed in crane commit `24eafd8` on 13 August 2026, and that tag is the
   first to carry it. For testing a branch, build crane from the commit
   `.github/workflows/test-e2e-minikube-pr.yml` pins and put it first on `PATH` before running
-  `tests/e2e-transform.sh`. Users install a release instead; the README covers that.
+  `tests/e2e-transform.sh`. Users install a crane release and add the plugin with
+  `crane plugin-manager add`; the README covers that.
 - Run the Go suite as CI does: `GOWORK=off go test ./... -count=1`. The workspace `go.work`
   outside this repo can resolve different dependency versions.
 - On OpenShift, `kubectl get build/<name>` is the OpenShift Build API. Write

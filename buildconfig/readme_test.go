@@ -11,9 +11,9 @@ import (
 const readmePath = "../README.md"
 
 // The README is for someone migrating BuildConfigs. It no longer asks anyone to
-// install Go or build crane, because the plugin ships compiled into the crane
-// binary, so the toolchain and crane pin it used to quote now live in the
-// developer docs. These two are where those versions have to match.
+// install Go or build crane, because both crane and this plugin install as
+// released binaries, so the toolchain and crane pin it used to quote now live
+// in the developer docs. These two are where those versions have to match.
 const (
 	agentsPath     = "../AGENTS.md"
 	hackReadmePath = "../hack/README.md"

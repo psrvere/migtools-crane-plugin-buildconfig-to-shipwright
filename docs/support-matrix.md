@@ -304,7 +304,7 @@ JSON object: a key per flag, and a string value. The warnings quote the names wi
 `--`; the names are the same.
 
 ```bash
-crane transform \
+crane transform KubernetesPlugin BuildConfigToBuildsPlugin \
   --optional-flags '{"registry-mapping":"image-registry.openshift-image-registry.svc:5000=quay.io/myorg","imagestream-mapping":"myns/mybuilder:latest=quay.io/myorg/builder:latest"}'
 ```
 
