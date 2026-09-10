@@ -54,7 +54,7 @@ operator installs. See [Prerequisites](#prerequisites).
   strategy called `buildah` at all, and its `source-to-image` declares one parameter where the
   catalog's declares nine, so renaming the strategy only moves the failure from the name to the
   parameters. [ADR-0010](docs/adr/0010-strategy-names-target-the-red-hat-catalog.md) has the
-  comparison. The cluster tests do run on upstream Shipwright v0.19.0, and carry a strategy
+  comparison. The cluster tests do run on upstream Shipwright v0.21.0, and carry a strategy
   override per test case to do it.
 
 ### Install crane
