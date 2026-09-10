@@ -24,9 +24,7 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000/my-app/sample-nodejs:latest
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: registry.access.redhat.com/ubi9/nodejs-18:latest
   source:
     contextDir: source-build

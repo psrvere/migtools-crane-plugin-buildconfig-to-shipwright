@@ -46,8 +46,6 @@ What to look at:
 | annotation `conversion-outcome: converted-with-warnings` | something was dropped or needs review; the warnings say what |
 | annotation `original-triggers` | the `ConfigChange` trigger, kept for the day triggers exist in Shipwright |
 
-The `configMapValue: null` and `secretValue: null` lines under `paramValues` are
-serialisation noise from the Shipwright types. Shipwright accepts them.
 
 ## The warnings
 

@@ -25,9 +25,7 @@ spec:
     image: ${REGISTRY}/${NAMESPACE}/${BUILD_NAME}:latest
     insecure: true
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: ${BUILDER_IMAGE}
   source:
     contextDir: source-build
