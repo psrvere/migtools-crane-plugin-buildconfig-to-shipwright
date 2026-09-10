@@ -1,6 +1,7 @@
 package buildconfig
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -268,7 +269,7 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 	if next := strings.Index(section, "\n## "); next >= 0 {
 		section = section[:next]
 	}
-	row := regexp.MustCompile("(?m)^\\| (?:<a [^>]*></a>)?W(\\d+) \\| ([^\n]*)$")
+	row := regexp.MustCompile("(?m)^\\| <a id=\"w(\\d+)\" name=\"w(\\d+)\"></a>W(\\d+) \\| ([^\n]*)$")
 	quote := regexp.MustCompile("`([^`]+)`")
 	prose := regexp.MustCompile(`^W\d+( (or|to|and) W\d+)*, `)
 	retired := regexp.MustCompile(`^Retired by BUILD-[0-9]+\b`)
@@ -277,27 +278,33 @@ func quotedWarnings(t *testing.T, doc string) map[string]string {
 	highest := 0
 	proseRows := 0
 	for _, m := range row.FindAllStringSubmatch(section, -1) {
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			t.Fatalf("%s row W%s: %v", supportMatrixPath, m[1], err)
+		if m[1] != m[3] || m[2] != m[3] {
+			t.Errorf("%s row W%s carries anchor id %q and name %q; all three numbers must agree", supportMatrixPath, m[3], m[1], m[2])
 		}
-		id := "W" + m[1]
+		n, err := strconv.Atoi(m[3])
+		if err != nil {
+			t.Fatalf("%s row W%s: %v", supportMatrixPath, m[3], err)
+		}
+		id := "W" + m[3]
 		rows[n]++
 		if n > highest {
 			highest = n
 		}
-		q := quote.FindStringSubmatch(m[2])
+		q := quote.FindStringSubmatch(m[4])
 		switch {
 		case q != nil:
 			out[id] = q[1]
-		case prose.MatchString(m[2]):
+		case prose.MatchString(m[4]):
 			proseRows++
-		case !retired.MatchString(m[2]):
+		case !retired.MatchString(m[4]):
 			t.Errorf("%s row %s quotes no warning and is neither a prose row pointing at other rows nor a retired one", supportMatrixPath, id)
 		}
 	}
 	if highest == 0 {
 		t.Fatalf("%s has no rows in its warning reference table", supportMatrixPath)
+	}
+	if want := fmt.Sprintf("keyed [W1](#w1) to [W%d](#w%d)", highest, highest); !strings.Contains(doc, want) {
+		t.Errorf("%s intro does not say %q; the highest row is W%d", supportMatrixPath, want, highest)
 	}
 	for n := 1; n <= highest; n++ {
 		if rows[n] != 1 {

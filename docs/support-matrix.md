@@ -235,7 +235,7 @@ These are dropped silently. Check for them yourself.
 
 | Field | Why it matters |
 |---|---|
-| `spec.mountTrustedCA` | A build that mounted the cluster's trusted CA bundle loses it. No warning. Work in progress: [PR #23](https://github.com/migtools/crane-plugin-buildconfig-to-shipwright/pull/23) (BUILD-2265) maps this field to the `trusted-ca` overridable volume of the shipped strategies, backed by a per-Build ConfigMap that the Cluster Network Operator fills with the CA bundle. Not merged; this row moves to [Build settings](#build-settings) when it lands |
+| `spec.mountTrustedCA` | A build that mounted the cluster's trusted CA bundle loses it. No warning. A fix is planned: see [known-limitations.md](known-limitations.md#planned) |
 | `spec.revision` | Runtime state, not configuration. `BuildConfig` and `Build` share the same spec struct, so the field exists on a BuildConfig, but OpenShift only fills it in on the `Build` objects it creates. On the BuildConfig the plugin reads it is empty. Not the same thing as `source.git.ref`, which is migrated; see the note below |
 | `spec.strategy.customStrategy`, `spec.strategy.jenkinsPipelineStrategy` | The whole BuildConfig is skipped, so the contents are never read |
 | `status` | Runtime state of the source cluster. Not configuration |

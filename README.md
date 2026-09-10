@@ -26,8 +26,8 @@ For every resource in a crane export:
   takes one source per Build, so a BuildConfig with more than one source type fails here.
   Neither stops the migration.
 
-Every field the plugin drops or changes produces a warning, in the log and in an annotation
-on the Build. The annotation is size-capped, so on a very lossy BuildConfig the log is the
+Every field the plugin reads and then drops or changes produces a warning, in the log and in
+an annotation on the Build. The few fields it never reads are listed in the support matrix. The annotation is size-capped, so on a very lossy BuildConfig the log is the
 complete list. The full list, field by field, is in [docs/support-matrix.md](docs/support-matrix.md).
 The short list of what does not migrate, and what is planned, is in
 [docs/known-limitations.md](docs/known-limitations.md).
