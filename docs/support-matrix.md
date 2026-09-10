@@ -300,13 +300,13 @@ More than one `source.images` entry fails the conversion and the error names the
 | `--insecure-registries` | `registry,…` | Keyed on the strategy name written to the Build, not on the BuildConfig's strategy type. `source-to-image`: `spec.output.insecure: true` when the output image is on one of them. Any other name, including a `--default-build-strategy` override for S2I: `spec.paramValues[registries-insecure]` |
 | `--block-registries` | `registry,…` | `spec.paramValues[registries-block]` |
 
-These are not top-level flags. Pass them as `name=value` pairs, comma separated, inside crane's
-`--optional-flags`. The warnings quote them with a leading `--`; the names are the same.
+These are not top-level flags. They go inside crane's `--optional-flags`, which takes one
+JSON object: a key per flag, and a string value. The warnings quote the names with a leading
+`--`; the names are the same.
 
 ```bash
-crane transform BuildConfigToBuildsPlugin \
-  --plugin-dir ./plugins \
-  --optional-flags "registry-mapping=image-registry.openshift-image-registry.svc:5000=quay.io/myorg,imagestream-mapping=myns/mybuilder:latest=quay.io/myorg/builder:latest"
+crane transform KubernetesPlugin BuildConfigToBuildsPlugin \
+  --optional-flags '{"registry-mapping":"image-registry.openshift-image-registry.svc:5000=quay.io/myorg","imagestream-mapping":"myns/mybuilder:latest=quay.io/myorg/builder:latest"}'
 ```
 
 `crane transform optionals` prints the same list with examples.
