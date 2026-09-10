@@ -10,6 +10,15 @@ import (
 
 const readmePath = "../README.md"
 
+// The README is for someone migrating BuildConfigs. It no longer asks anyone to
+// install Go or build crane, because the plugin ships compiled into the crane
+// binary, so the toolchain and crane pin it used to quote now live in the
+// developer docs. These two are where those versions have to match.
+const (
+	agentsPath     = "../AGENTS.md"
+	hackReadmePath = "../hack/README.md"
+)
+
 // optionalFlagsExample matches a --optional-flags value in the README. Only the
 // single-quoted form is accepted: the value is a JSON object, so it is full of
 // double quotes, and a double-quoted shell form would have to escape every one
@@ -84,11 +93,12 @@ func TestReadmeVersionsMatchPins(t *testing.T) {
 		if !ok {
 			return
 		}
-		// go.mod pins a patch version; the README quotes major.minor. Match on a
+		// go.mod pins a patch version; AGENTS.md quotes major.minor. Match on a
 		// word boundary so "Go 1.26" does not satisfy a go.mod asking for 1.260.
+		agents := readFile(t, agentsPath)
 		minor := regexp.MustCompile(`^\d+\.\d+`).FindString(full)
-		if !regexp.MustCompile(`Go ` + regexp.QuoteMeta(minor) + `\b`).MatchString(readme) {
-			t.Errorf("%s does not say \"Go %s\"; go.mod requires %s", readmePath, minor, full)
+		if !regexp.MustCompile(`Go ` + regexp.QuoteMeta(minor) + `\b`).MatchString(agents) {
+			t.Errorf("%s does not say \"Go %s\"; go.mod requires %s", agentsPath, minor, full)
 		}
 	})
 
@@ -117,8 +127,11 @@ func TestReadmeVersionsMatchPins(t *testing.T) {
 		if len(pins) != 1 {
 			t.Fatalf("expected exactly one `git checkout <sha>` in the CI workflow, found %d; anchor this check to the crane clone", len(pins))
 		}
-		if !strings.Contains(readme, pins[0][1]) {
-			t.Errorf("%s does not name the crane commit CI pins, %s", readmePath, pins[0][1])
+		// hack/README.md is the one page that still builds crane from source, so
+		// it is the page that has to name the same commit as the workflow.
+		hack := readFile(t, hackReadmePath)
+		if !strings.Contains(hack, pins[0][1]) {
+			t.Errorf("%s does not name the crane commit CI pins, %s", hackReadmePath, pins[0][1])
 		}
 	})
 }

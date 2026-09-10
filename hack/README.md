@@ -9,15 +9,20 @@ This directory contains scripts for setting up development and E2E testing envir
   **Installation:**
   
   ```bash
-  # Build from source
+  # Build from source, at the commit CI pins
   git clone https://github.com/migtools/crane.git
   cd crane
+  git checkout d566a18f6640cd79c8568749d6621b40486d0625
   go build -o crane .
   sudo mv crane /usr/local/bin/
   
   # Verify installation
   crane version
   ```
+
+  Testing a branch means running the branch's own plugin binary against a crane you control,
+  so build both rather than installing a release. The commit is the one
+  `.github/workflows/test-e2e-minikube-pr.yml` pins; keep the two in step.
 
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [minikube](https://minikube.sigs.k8s.io/docs/start/)

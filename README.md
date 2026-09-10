@@ -39,33 +39,34 @@ complete list. The full list, field by field, is in [docs/support-matrix.md](doc
 
 ## Prerequisites
 
-- **Go 1.25.6 or newer** to build the plugin.
-- **crane built from commit `d566a18f6640cd79c8568749d6621b40486d0625` or newer.** The
-  released crane (v0.0.5) does not write the resources a plugin generates: it runs this
-  plugin, reports nothing, and produces no Builds. This is the commit CI pins.
+- **crane TBD-CRANE-VERSION or newer.** This plugin is compiled into it, so there is one
+  binary to install and nothing to build.
 - **A target cluster with Shipwright and Tekton**, and the `buildah` and `source-to-image`
-  ClusterBuildStrategies. Builds for Red Hat OpenShift ships both. Upstream, CI tests
-  against Shipwright v0.19.0.
+  ClusterBuildStrategies. Builds for Red Hat OpenShift ships both, generated from
+  [strategy-catalog](https://github.com/redhat-openshift-builds/strategy-catalog). Which
+  version of them you have decides whether the params the plugin writes are declared: a
+  Build carrying a param its strategy does not know lands with `Registered=False`, reason
+  `UndefinedParameter`. Upstream, CI tests against Shipwright v0.19.0.
 
 ### Install crane
 
+Take the binary for your platform from the [releases
+page](https://github.com/migtools/crane/releases):
+
 ```bash
-git clone https://github.com/migtools/crane.git
-cd crane
-git checkout d566a18f6640cd79c8568749d6621b40486d0625
-go build -o crane .
+CRANE_VERSION=TBD-CRANE-VERSION
+curl -Lo crane "https://github.com/migtools/crane/releases/download/${CRANE_VERSION}/crane_linux_amd64"
+chmod +x crane
 sudo mv crane /usr/local/bin/
 crane version
 ```
 
-### Build the plugin
+Assets are named `crane_<os>_<arch>`, so `crane_darwin_arm64`, `crane_linux_arm64` and
+`crane_windows_amd64.exe` are there too, and `checksums.txt` on the same release verifies
+them.
 
-```bash
-GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-shipwright .
-mkdir -p plugins && mv crane-plugin-buildconfig-to-shipwright plugins/
-```
-
-crane finds plugins by scanning the directory passed as `--plugin-dir`.
+Working on the plugin rather than using it means building crane and the plugin from source.
+That is in [hack/README.md](hack/README.md).
 
 ## Usage with crane
 
@@ -78,14 +79,17 @@ crane export -n myapp
 ### 2. Transform
 
 ```bash
-crane transform BuildConfigPlugin \
-  --plugin-dir ./plugins \
+crane transform \
   --optional-flags '{"registry-mapping":"image-registry.openshift-image-registry.svc:5000=quay.io/myorg"}'
 ```
 
+Naming no stage runs every stage crane found, which is this plugin and the built-in
+`KubernetesPlugin` that strips `uid`, `resourceVersion` and `status`. Those fields stop a
+resource applying to a different cluster, so leave that stage in.
+
 `--optional-flags` takes one JSON object whose keys are the plugin's flags and whose values
-are strings. The flags are listed [below](#plugin-flags); `crane transform optionals
---plugin-dir ./plugins` prints them with an example each.
+are strings. The flags are listed [below](#plugin-flags); `crane transform optionals` prints
+them with an example each.
 
 ### 3. Write the output, then read it
 
@@ -196,38 +200,11 @@ to the target registry. The plugin warns either way.
 | [docs/architecture.md](docs/architecture.md) | for maintainers and agents: how the plugin runs, the conversion steps, the rules that must stay true |
 | [hack/README.md](hack/README.md) | setting up a Minikube cluster with Shipwright for the cluster tests |
 
-## Testing
+## Working on the plugin
 
-Three levels.
-
-**Unit tests**, no cluster:
-
-```bash
-GOTOOLCHAIN=auto go test ./...
-```
-
-These include the tests that keep the documentation honest: the support matrix must list
-every warning the code can emit, the architecture page must name every file and step, the
-examples must match the plugin's output, and this README's flag examples and version numbers
-must match the code and CI.
-
-**Plugin E2E**, the binary driven by crane over sample exports, no cluster. Needs the pinned
-crane first on `PATH`:
-
-```bash
-./tests/e2e-transform.sh
-```
-
-**Cluster E2E**, on a Minikube cluster with Tekton and Shipwright. Converts two BuildConfigs
-through crane, diffs each Build against a committed golden file, applies it, and runs a
-BuildRun to completion:
-
-```bash
-./tests/e2e-cluster.sh              # after ./hack/setup-minikube-shipwright.sh and ./hack/fake-minikube-buildconfig.sh
-./tests/e2e-cluster.sh --skip-build # verify the manifests only
-```
-
-Pull requests run the unit tests and the cluster E2E.
+Building crane and the plugin from source, the three levels of tests, and setting up a
+Minikube cluster with Tekton and Shipwright are in [hack/README.md](hack/README.md) and
+[AGENTS.md](AGENTS.md). Pull requests run the unit tests and the cluster E2E.
 
 ## Issue tracking
 
