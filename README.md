@@ -37,15 +37,24 @@ complete list. The full list, field by field, is in [docs/support-matrix.md](doc
 | Custom | none | skipped, passed through with two annotations |
 | JenkinsPipeline | none | skipped, passed through with two annotations |
 
+Both strategy names come from strategy-catalog, the set the Builds for Red Hat OpenShift
+operator installs. See [Prerequisites](#prerequisites).
+
 ## Prerequisites
 
 - **Go 1.25.6 or newer** to build the plugin.
 - **crane built from commit `d566a18f6640cd79c8568749d6621b40486d0625` or newer.** The
   released crane (v0.0.5) does not write the resources a plugin generates: it runs this
   plugin, reports nothing, and produces no Builds. This is the commit CI pins.
-- **A target cluster with Shipwright and Tekton**, and the `buildah` and `source-to-image`
-  ClusterBuildStrategies. Builds for Red Hat OpenShift ships both. Upstream, CI tests
-  against Shipwright v0.19.0.
+- **A target cluster running the Builds for Red Hat OpenShift operator**, which installs the
+  `buildah` and `source-to-image` ClusterBuildStrategies from
+  [strategy-catalog](https://github.com/redhat-openshift-builds/strategy-catalog). Those are the
+  two names the plugin writes. Upstream Shipwright is not a supported target: it ships no
+  strategy called `buildah` at all, and its `source-to-image` declares one parameter where the
+  catalog's declares nine, so renaming the strategy only moves the failure from the name to the
+  parameters. [ADR-0010](docs/adr/0010-strategy-names-target-the-red-hat-catalog.md) has the
+  comparison. The cluster tests do run on upstream Shipwright v0.19.0, and carry a strategy
+  override per test case to do it.
 
 ### Install crane
 
@@ -158,7 +167,7 @@ cluster. A test regenerates their output on every CI run, so they cannot drift.
 |---|---|---|
 | `registry-mapping` | `old-registry=new-registry,…` | Rewrites the registry prefix of resolved image references. Applies to strategy and source images, and to an output of kind `ImageStreamTag`. An output of kind `DockerImage` is copied as written |
 | `imagestream-mapping` | `ns/name:tag=registry/image:tag,…` | Replaces an ImageStreamTag or ImageStreamImage reference, or a bare DockerImage name that relied on `lookupPolicy.local`, with a concrete image. Digest form: `ns/name@sha256:…=…` |
-| `default-build-strategy` | `docker=name,s2i=name` | Uses a different ClusterBuildStrategy name |
+| `default-build-strategy` | `docker=name,s2i=name` | Names a **copy** of a catalog strategy: the volume copy in [docs/volume-migration.md](docs/volume-migration.md), a variant with an extra parameter, a differently named install. Not a way to target upstream Shipwright, whose strategies declare fewer parameters. With a custom name the BuildRun template omits `stepResources` |
 | `search-registries` | `registry,…` | Buildah search registries |
 | `insecure-registries` | `registry,…` | Docker strategy: the `registries-insecure` param. Source strategy: `spec.output.insecure: true` when the output image is on one of them, because Shipwright does the push there |
 | `block-registries` | `registry,…` | Buildah blocked registries |

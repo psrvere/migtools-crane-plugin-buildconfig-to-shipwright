@@ -31,9 +31,11 @@ Shipwright volume semantics (upstream `shipwright/build`):
 - Mount paths are fixed by the strategy's step `volumeMounts`. A Build volume
   carries only a name and a volume source (Secret/ConfigMap) — never a path.
 
-The shipped `buildah` / `source-to-image` ClusterBuildStrategies do not
-declare your BuildConfig's volume names, so the converted Build cannot
-register until you provide a strategy copy that does.
+The shipped `buildah` / `source-to-image` ClusterBuildStrategies — the ones
+strategy-catalog installs with the Builds for Red Hat OpenShift operator — do
+not declare your BuildConfig's volume names, so the converted Build cannot
+register until you provide a strategy copy that does. Copying a catalog
+strategy is what `--default-build-strategy` is for (ADR-0010).
 
 ## Fix, step by step
 

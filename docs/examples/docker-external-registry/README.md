@@ -38,7 +38,7 @@ What to look at:
 
 | In the Build | Where it came from |
 |---|---|
-| `spec.strategy.name: buildah` | the Docker strategy type. Change it with the `default-build-strategy` flag if your cluster names the strategy differently |
+| `spec.strategy.name: buildah` | the Docker strategy type. `buildah` is the strategy-catalog name the Builds for Red Hat OpenShift operator installs. Point the Build at a copy of it with the `default-build-strategy` flag |
 | `spec.paramValues[dockerfile]: Dockerfile` | `dockerStrategy.dockerfilePath` |
 | `spec.source.git` with `url` and `revision` | `source.git.uri` and `source.git.ref` |
 | `spec.output.image: quay.io/myorg/buildconfig-test/ruby-hello-world:latest` | the ImageStreamTag output, resolved to the internal-registry form `image-registry.openshift-image-registry.svc:5000/buildconfig-test/ruby-hello-world:latest`, then rewritten by the registry mapping. The namespace stays in the path |

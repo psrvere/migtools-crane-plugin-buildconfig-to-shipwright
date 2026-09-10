@@ -43,8 +43,8 @@ func (p *BuildConfigTransformPlugin) Metadata() transform.PluginMetadata {
 			},
 			{
 				FlagName: DefaultBuildStrategyFlag,
-				Help:     "Override default ClusterBuildStrategy names, format: docker=my-buildah,s2i=my-s2i",
-				Example:  "docker=my-buildah,s2i=my-s2i",
+				Help:     "Name a copy of a strategy-catalog ClusterBuildStrategy, format: docker=buildah-with-volumes,s2i=source-to-image-with-volumes",
+				Example:  "docker=buildah-with-volumes,s2i=source-to-image-with-volumes",
 			},
 			{
 				FlagName: SearchRegistriesFlag,

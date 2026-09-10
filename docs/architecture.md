@@ -77,7 +77,7 @@ and five more on an error. The rest only add to the Build or warn.
 | # | Step | Function | Reads | Writes | Can end the conversion |
 |---|---|---|---|---|---|
 | 1 | Skeleton | inline in `Convert` | name, namespace, labels, annotations | a new Build with the same name (sanitized by `uniqueName`), the labels and annotations minus the OpenShift-managed ones that `filterMetadata` drops at INFO, and the `converted-from` annotation | no |
-| 2 | Strategy | inline switch, then `processDockerStrategy` or `processSourceStrategy` | `spec.strategy` | strategy name (`buildah` or `source-to-image`, or the override from `default-build-strategy`), the strategy params, `spec.env`, `spec.volumes` | Custom and JenkinsPipeline: skipped. Unknown type: failed. A `from` image that cannot be resolved: failed |
+| 2 | Strategy | inline switch, then `processDockerStrategy` or `processSourceStrategy` | `spec.strategy` | strategy name (`buildah` or `source-to-image`, both strategy-catalog names, or the override from `default-build-strategy`), the strategy params, `spec.env`, `spec.volumes` | Custom and JenkinsPipeline: skipped. Unknown type: failed. A `from` image that cannot be resolved: failed |
 | 3 | Output-image gate | inline in `Convert` | `spec.output.to` | nothing | Missing or empty: skipped. Shipwright requires an output image |
 | 4 | Pull secret | inline, `getPullSecret`, `generateServiceAccount` | the strategy's `pullSecret`, `spec.serviceAccount` | a new ServiceAccount carrying the secret, only when the BuildConfig names no service account | serialization error: failed |
 | 5 | Named service account | inline in `Convert` | `spec.serviceAccount` | nothing; warns that its secrets and RBAC must be recreated by hand | no |
@@ -269,6 +269,7 @@ reasoning.
 | 14 | Never generate a volume for a source secret or ConfigMap | the Dockerfile also needs an edit the plugin cannot make; half the job produces builds that fail silently | `converter_test.go` (source secrets and ConfigMaps tests) |
 | 15 | A convertible BuildConfig always produces a Build. Degraded and warned, never blocked | the migration's job is to get resources onto the target and report gaps | `outcome_test.go` (`TestConvertOutcomeConvertedWithWarnings`) |
 | 16 | Chained builds are noticed per BuildConfig: a same-namespace `ImageStreamTag` input gets the run-order sentence on every warning that names it, or, when no warning does, one info line that leaves the outcome `converted`. Never a cross-resource pass, never a Build trigger | crane runs the plugin once per resource, and a notice that reports no loss must not mark a clean conversion lossy | `chain_test.go` (`TestChainInfoForInputNoWarningNames`, `TestChainNoticeControls`). ADR-0009 |
+| 17 | The default strategy names, `buildah` and `source-to-image`, are strategy-catalog names. The target is a cluster running the Builds for Red Hat OpenShift operator; upstream Shipwright is not a supported target, and `--default-build-strategy` renames to a copy of a catalog strategy, not to an upstream one | upstream declares a smaller parameter set, so renaming trades a failure on the name for one on the parameters | `converter_test.go` (`TestConvertDockerStrategyBasic`, `TestConvertSourceStrategyBasic`) assert the two names. ADR-0010 |
 
 ## Where to add things
 

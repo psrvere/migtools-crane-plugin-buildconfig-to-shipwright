@@ -19,6 +19,7 @@ here refines it or departs from it, and says which.
 | [0007](0007-volumes-fail-closed-original-names.md) | Volumes are converted under their original names and left to fail on the cluster, legibly |
 | [0008](0008-triggers-preserved-not-converted.md) | Triggers are preserved and warned about, never converted |
 | [0009](0009-chained-builds-per-buildconfig-notice.md) | Chained builds get a per-BuildConfig notice, never a cross-resource pass or a trigger |
+| [0010](0010-strategy-names-target-the-red-hat-catalog.md) | The default strategy names target the Builds for Red Hat OpenShift catalog, and upstream Shipwright is not a supported target |
 
 A test checks that every file here has those parts, that the index and the files agree, and
 that no link here points at a file that is missing. Nothing checks that a new decision gets a
