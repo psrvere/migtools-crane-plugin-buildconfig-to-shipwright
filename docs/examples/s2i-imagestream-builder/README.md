@@ -87,9 +87,13 @@ crane apply
    OpenShift Build API.
 
 2. Delete the GitHub webhook that pointed at the old cluster, or repoint it at whatever
-   you set up to create BuildRuns on push.
+   you set up to create BuildRuns on push. The listener in
+   [trigger-migration.md](../../trigger-migration.md#webhooks-github-gitlab-bitbucket-generic)
+   is one.
 
-3. If anything rebuilt when the builder image changed, arrange that in your pipeline.
+3. If anything rebuilt when the builder image changed, arrange that in your pipeline. The
+   Pipeline in [trigger-migration.md](../../trigger-migration.md#imagechange) runs the two
+   builds in order.
 
 Rows in the [support matrix](../../support-matrix.md): Source (S2I) strategy, Image references,
 Output, Triggers.

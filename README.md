@@ -135,13 +135,17 @@ Write `build.shipwright.io`, not `build`, in every kubectl command. On OpenShift
 name resolves to the OpenShift Build API.
 
 Nothing builds on its own. OpenShift triggers do not exist in Shipwright, so create a
-`BuildRun` to start the first build.
+`BuildRun` to start the first build. The triggers the BuildConfig had are in
+[docs/trigger-migration.md](docs/trigger-migration.md): a listener for webhooks, a Pipeline
+or a CronJob for ImageChange.
 
 Which ServiceAccount it runs as depends on whether the plugin generated one. If it did not,
 leave the BuildRun's `serviceAccount` unset and it runs as the namespace `pipeline` account.
-If it did, that account carries the BuildConfig's pull secret and the plugin names it in the
-Build's `buildconfig-to-shipwright/buildrun-template` annotation, so point the BuildRun at
-it. Leaving it unset there drops the pull secret and a private builder image will not pull.
+If it did, that account carries the BuildConfig's pull secret, so point the BuildRun at it.
+The plugin names it in the Build's `buildconfig-to-shipwright/buildrun-template` annotation
+when the BuildConfig also set resources; otherwise it is the account named after the
+BuildConfig next to the Build. Leaving it unset drops the pull secret and a private builder
+image will not pull.
 On OpenShift, grant the generated account the SCC buildah needs, scoped to that one account:
 
 ```bash
@@ -196,6 +200,7 @@ to the target registry. The plugin warns either way.
 | [docs/known-limitations.md](docs/known-limitations.md) | what does not migrate, what to do instead, and what is planned |
 | [docs/examples](docs/examples/README.md) | three worked examples, verified on a cluster |
 | [docs/volume-migration.md](docs/volume-migration.md) | why a Build with volumes fails with `UndefinedVolume`, and the strategy-copy fix |
+| [docs/trigger-migration.md](docs/trigger-migration.md) | getting builds to fire again: a listener for webhooks, a Pipeline and a CronJob for ImageChange, the first BuildRun for ConfigChange |
 | [docs/architecture.md](docs/architecture.md) | for maintainers and agents: how the plugin runs, the conversion steps, the rules that must stay true |
 | [hack/README.md](hack/README.md) | setting up a Minikube cluster with Shipwright for the cluster tests |
 

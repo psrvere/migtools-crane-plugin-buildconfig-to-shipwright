@@ -140,8 +140,8 @@ not reword a warning without saying which matrix row moves.
 
 These tests guard the docs. A red one means a doc to update, not a test to weaken.
 
-Six of the eight land with the sibling documentation PRs (#64, #65, #66 to #68, #70) and do
-not exist on `main` yet. They are listed here so the table is complete when those merge.
+Every test in the table exists on `main`. Six of them landed with the documentation PRs
+(#64, #65, #66 to #68, #70).
 
 | Test | Guards | Fix |
 |---|---|---|
@@ -150,6 +150,7 @@ not exist on `main` yet. They are listed here so the table is complete when thos
 | `TestInvariantsCiteRealTests` | every test the architecture page cites exists | rename it in the page, or restore the test |
 | `TestExamplesMatchCommittedOutput` | each `docs/examples/*/expected/` matches the plugin's output | `go test ./buildconfig -run TestExamplesMatchCommittedOutput -update` (once #66 to #68 land; the flag does not exist before that), then re-read that example's README. A regenerated expectation is a changed assertion, so it is read line by line like any other golden file |
 | `TestReadmeOptionalFlagsAreValidJSON`, `TestReadmeVersionsMatchPins` | README flag examples are JSON; README versions match `go.mod`, the Minikube script, and the CI crane pin | fix the README |
+| `TestTriggerRunbookYAMLParses` | every `yaml` block in `docs/trigger-migration.md` is a document `kubectl apply` could read | fix the block; the failure names its line |
 | `TestADRsAreWellFormed` | every record has its parts and is in the index | fix the record |
 | `TestNoDirectWarnLoggingInConverter` | no `c.Log.Warn*` in a Converter method other than `warnf`, which is the single recording path | record the drop through `c.warnf` (ADR-0003) |
 
