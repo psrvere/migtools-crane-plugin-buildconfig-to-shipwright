@@ -21,15 +21,11 @@ spec:
   output:
     image: ${REGISTRY}/${NAMESPACE}/ruby-hello-world:latest
   paramValues:
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   - name: registries-insecure
     values:
-    - configMapValue: null
-      secretValue: null
-      value: ${REGISTRY}
+    - value: ${REGISTRY}
   source:
     git:
       revision: master

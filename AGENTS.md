@@ -51,7 +51,7 @@ what stamps a real one, with
 `-ldflags "-X github.com/migtools/crane-plugin-buildconfig-to-builds/buildconfig.PluginVersion=<tag>"`,
 so `crane plugin-manager list --installed` saying `devel` means a local build, not a bug.
 
-Requires Go 1.25.6+ (forced by transitive dependencies, notably `shipwright-io/build v0.19.0`). Newer Shipwright releases (v0.20+) pull in k8s v0.36 and require Go 1.26; this module stays on Shipwright v0.19.0 / k8s v0.34 to remain buildable with the Go 1.25 toolchain. The pinned crane-lib pseudo-version (`v0.1.6-0.20260807130033-222a325c7cee`) provides the unreleased `NewResources` API — update this when crane-lib publishes a new release.
+Requires Go 1.26.4+, forced by `shipwright-io/build v0.21.0`, which pulls in k8s v0.36 and declares `go 1.26.4`. The module sat on Shipwright v0.19.0 / Go 1.25.6 for a while so it could be built alongside mta-crane, which is still on Go 1.25.6; v0.21.0 is the first release carrying the `omitempty` tags on `SingleValue` (BUILD-1743), so consuming it costs the Go 1.25 toolchain. The pinned crane-lib pseudo-version (`v0.1.6-0.20260807130033-222a325c7cee`) provides the unreleased `NewResources` API — update this when crane-lib publishes a new release.
 
 ## Development tools (`hack/`)
 
