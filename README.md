@@ -85,10 +85,22 @@ crane plugin-manager add BuildConfigToBuildsPlugin
 crane plugin-manager list
 ```
 
-The binary lands in `$HOME/.local/share/crane/plugins`, which is where `crane transform`
-looks unless told otherwise, so no `--plugin-dir` is needed below. `--global` installs to
-`/usr/local/share/crane/plugins` for every user on the machine instead.
+The binary lands in `$HOME/.local/share/crane/plugins`. `--global` installs to
+`/usr/local/share/crane/plugins` for every user on the machine instead. `crane transform`
+searches both of those, plus `/usr/share/crane/plugins` and a `plugins/` directory under
+the current working directory, so neither install needs `--plugin-dir` below. A binary you
+keep anywhere else, one you were handed or built yourself, does:
 
+```bash
+crane transform KubernetesPlugin BuildConfigToBuildsPlugin --plugin-dir /path/to/plugins
+```
+
+A crane built from [migtools/mta-crane](https://github.com/migtools/mta-crane) has this
+plugin compiled in, so skip this section there. Still name the stage in every
+`crane transform` below: the built-in is registered off by default and runs only when named.
+
+crane's own [README](https://github.com/migtools/crane/blob/main/README.md) covers
+installing crane, the plugin manager and the export, transform and apply cycle in general.
 Working on the plugin rather than using it means building crane and the plugin from source.
 That is in [hack/README.md](hack/README.md).
 
