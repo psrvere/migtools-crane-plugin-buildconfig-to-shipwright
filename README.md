@@ -44,9 +44,9 @@ operator installs. See [Prerequisites](#prerequisites).
 
 ## Prerequisites
 
-- **crane v0.11.0-alpha.1 or newer**, with this plugin installed into it. crane ships with
-  no plugins of its own; `crane plugin-manager` fetches them. Both steps are below, and
-  neither needs a Go toolchain.
+- **crane v0.11.0-alpha.1 or newer**, with this plugin installed into it. Every crane binary
+  carries `KubernetesPlugin`, and nothing else: this plugin, like `OpenShiftPlugin`, is
+  fetched by `crane plugin-manager`. Both steps are below, and neither needs a Go toolchain.
 - **A target cluster running the Builds for Red Hat OpenShift operator**, which installs the
   `buildah` and `source-to-image` ClusterBuildStrategies from
   [strategy-catalog](https://github.com/redhat-openshift-builds/strategy-catalog). Those are the
@@ -78,7 +78,10 @@ them.
 
 crane keeps a plugin index at
 [migtools/crane-plugins](https://github.com/migtools/crane-plugins). `plugin-manager` reads
-it and downloads the released binary for your platform:
+it and downloads the released binary for your platform. The URL it reads is baked in and
+spelled `konveyor/crane-plugins`, the repository's former name, which GitHub redirects to
+the same place. Point it at a different index with the `DEFAULT_REPO_URL` environment
+variable; the `--repo` flag is accepted and then refused.
 
 ```bash
 crane plugin-manager add BuildConfigToBuildsPlugin
@@ -111,6 +114,16 @@ That is in [hack/README.md](hack/README.md).
 ```bash
 crane export -n myapp
 ```
+
+`crane export` takes `--include-gk` and `--exclude-gk` to narrow what comes out, and
+`--include-gk BuildConfig` is tempting when converting BuildConfigs is all you came for.
+Read the warnings on the Builds it produces before you do. A generated Build can name a
+push secret, a pull secret, a clone secret, a ConfigMap or Secret holding a build argument,
+and a ServiceAccount, and this plugin creates none of them: it copies the names across and
+leaves the resources to crane. Export only the BuildConfigs and those Builds apply to the
+target and then fail on the first run, for want of something the export left behind.
+[Issue #72](https://github.com/migtools/crane-plugin-buildconfig-to-builds/issues/72) is
+where the safe allowlist gets settled.
 
 ### 2. Transform
 
