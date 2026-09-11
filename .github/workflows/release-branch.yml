@@ -38,13 +38,21 @@ jobs:
           GIT_REF: ${{ inputs.git-ref }}
         run: |
           case "$VERSION" in
-            [0-9]*.[0-9]*) ;;
             v*) echo "drop the leading v: crane names these branches release-0.1, not release-v0.1"; exit 1 ;;
-            *) echo "version must be major.minor, like 0.1, got '$VERSION'"; exit 1 ;;
           esac
-          case "$VERSION" in
-            *.*.*) echo "use major.minor only: patch releases reuse the same branch"; exit 1 ;;
-          esac
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "version must be major.minor, like 0.1, got '$VERSION'"
+            echo "Patch releases reuse the branch, so there is no third component here."
+            exit 1
+          fi
+
+          # The plugin is pre-1.0 and a major release is a decision to make
+          # deliberately, not by typing it into a workflow box.
+          if [ "${VERSION%%.*}" != "0" ]; then
+            echo "'$VERSION' opens a major release line. This workflow ships 0.x only."
+            echo "A 1.0 is a deliberate call: agree it first, then change this check."
+            exit 1
+          fi
 
           branch="release-$VERSION"
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then

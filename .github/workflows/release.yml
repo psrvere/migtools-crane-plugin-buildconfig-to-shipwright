@@ -23,26 +23,60 @@ jobs:
           VERSION: ${{ inputs.version }}
           BRANCH: ${{ github.ref_name }}
         run: |
-          case "$VERSION" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "version must look like v1.2.3, got '$VERSION'"; exit 1 ;;
+          rest=${VERSION#v}
+          if [ "$rest" = "$VERSION" ]; then
+            echo "version must start with v, got '$VERSION'"
+            exit 1
+          fi
+
+          # Split a pre-release suffix off first. Issue #61 asks for alpha,
+          # beta and rc builds before a final release, so v0.1.0-alpha.1 has
+          # to get through, and trimming at the last dot would read its series
+          # as 0.1.0-alpha.
+          core=${rest%%-*}
+          case "$rest" in
+            *-*)
+              pre=${rest#*-}
+              if [ -z "$pre" ]; then
+                echo "'$VERSION' ends in a dash with no pre-release after it."
+                exit 1
+              fi
+              if ! printf '%s' "$pre" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.]*$'; then
+                echo "pre-release '$pre' must be alphanumerics and dots, like alpha.1 or rc1."
+                exit 1
+              fi
+              ;;
           esac
+
+          if ! printf '%s' "$core" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "version must be vMAJOR.MINOR.PATCH, got '$VERSION'"
+            exit 1
+          fi
+
+          # The plugin is pre-1.0 and a major release is a decision to make
+          # deliberately, not by typing it into a workflow box.
+          major=${core%%.*}
+          if [ "$major" != "0" ]; then
+            echo "'$VERSION' is a major release. This workflow ships 0.x only."
+            echo "A 1.0 is a deliberate call: agree it first, then change this check."
+            exit 1
+          fi
 
           # main carries the next version, not a released one. Cutting a
           # release from it would tag a moving target.
           case "$BRANCH" in
             release-*) ;;
             *) echo "refusing to release from '$BRANCH'."
-               echo "Run the Create release branch workflow, then run this against release-X.Y."
+               echo "Run the Create release branch workflow, then run this against release-0.Y."
                exit 1 ;;
           esac
 
           # v0.1.3 belongs on release-0.1. Catching this here stops a patch
           # landing on the wrong line.
-          series=${VERSION#v}
-          series=${series%.*}
-          if [ "$BRANCH" != "release-$series" ]; then
-            echo "$VERSION belongs on release-$series, but this is $BRANCH."
+          minor=${core#*.}
+          minor=${minor%%.*}
+          if [ "$BRANCH" != "release-0.$minor" ]; then
+            echo "$VERSION belongs on release-0.$minor, but this is $BRANCH."
             exit 1
           fi
 
