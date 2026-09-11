@@ -87,6 +87,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # This job holds contents: write and then runs the release branch's
+          # own tests. Leaving the token in .git/config puts it where that code
+          # could read it. Nothing here pushes with git: the tag and notes
+          # steps only read, and the release is published through the API.
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v6

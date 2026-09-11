@@ -63,4 +63,4 @@ jobs:
           git switch -c "$branch"
           git push origin "$branch"
           echo "Created $branch from $GIT_REF at $(git rev-parse --short HEAD)."
-          echo "Bump PluginVersion on $branch, then run the Release workflow against it."
+          echo "Run the Release workflow against $branch to cut a version from it."
