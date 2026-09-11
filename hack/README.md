@@ -60,39 +60,6 @@ declare fewer parameters, so a BuildConfig using `no-cache`, `squash`, `pull` or
 
 ## Script Reference
 
-### `write-plugin-index.py`
-
-Writes this plugin's entry into a checkout of the crane plugin index, both the manifest
-under `plugins/BuildConfigToBuilds/` and the line in the top-level `index.yaml`.
-
-Unlike everything else here, this one runs from the Release workflow rather than from your
-laptop, and what it writes decides which binary `crane plugin-manager add` downloads. Run
-it by hand only when the release could not open the index PR itself, which happens when no
-`PLUGIN_RELEASE` secret is set.
-
-Every fact about the plugin comes from the plugin's own metadata response, so the flag
-names, help and examples cannot drift from what the binary reports. The version, the
-repository and the asset naming come from the environment.
-
-**Usage:**
-```bash
-VERSION=v0.1.0 \
-REPO=migtools/crane-plugin-buildconfig-to-builds \
-META=/tmp/metadata.json \
-INDEX_ROOT=/path/to/crane-plugins \
-  python hack/write-plugin-index.py
-```
-
-`META` is a file holding the plugin's metadata response, which you get by running the
-binary with an empty JSON object on stdin:
-
-```bash
-echo '{}' | ./crane-plugin-buildconfig-to-builds > /tmp/metadata.json
-```
-
-Needs `pyyaml`. Running it twice for the same version rewrites that version's entry rather
-than adding a second one.
-
 ### `fake-minikube-buildconfig.sh`
 
 Installs a **fake** OpenShift BuildConfig CRD on non-OpenShift clusters (like Minikube) for testing.

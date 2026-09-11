@@ -58,11 +58,6 @@ When working with `hack/` scripts:
 
 This is intentional — `hack/` scripts trade robustness for maintainability and developer velocity. For production cluster setup, users should follow upstream documentation for Kubernetes, Tekton, and Shipwright.
 
-One file in here is none of the above. `write-plugin-index.py` runs from the release
-workflow, not from anyone's laptop, and what it writes becomes the manifest in
-`migtools/crane-plugins` that decides which binary a user downloads. Read it the way you
-read the workflows, not the way you read the Minikube scripts.
-
 ## Testing
 
 The project uses a three-level testing strategy:
@@ -111,9 +106,9 @@ A draft creates no tag and serves no assets. Publishing it is what does both, an
 downstream works until you do:
 
 - The entry in [migtools/crane-plugins](https://github.com/migtools/crane-plugins) is what
-  makes `crane plugin-manager add` work. The release opens that PR itself when a
-  `PLUGIN_RELEASE` secret exists, and otherwise prints how to do it by hand.
-  **Do not merge that PR before the release is published.** `plugin-manager add` does not
+  makes `crane plugin-manager add` work. Nothing here writes it: open that PR by hand, with a
+  manifest naming this release's assets, after the release is published.
+  **Do not merge it before the release is published.** `plugin-manager add` does not
   check the HTTP status of its download, so against an unpublished release it writes
   GitHub's 404 page into the plugins directory as the plugin binary and reports success.
 - mta-crane pins this plugin in its `go.mod`. That bump needs the tag to exist, so it comes
@@ -122,29 +117,6 @@ downstream works until you do:
 The release runs unit tests, not the cluster suite. `tests/e2e-cluster.sh` needs a cluster
 and nothing in the release job has one, so what the release proves is what `go test ./...`
 proves. Run the cluster tests on the branch before you cut from it.
-
-### The `PLUGIN_RELEASE` secret
-
-`crane-plugins` is a different repository, and the `GITHUB_TOKEN` a workflow gets by
-default reaches only the repository it runs in. Opening the index PR therefore needs a
-token of its own, read from a secret named `PLUGIN_RELEASE`.
-
-It is an Actions secret **on this repository**, under Settings, Secrets and variables,
-Actions. Its value is a token with **write access to
-[migtools/crane-plugins](https://github.com/migtools/crane-plugins)**, which is a different
-grant from write access here: someone who can merge to this repo may still not be able to
-mint a usable one.
-
-When the secret is missing or empty the release still publishes, and the run prints how to
-write the index entry by hand. That is the deliberate difference from
-`crane-plugin-openshift`, whose equivalent step fails the whole job: its last two releases
-went red there after publishing perfectly good binaries, and both index PRs were written by
-hand afterwards.
-
-A personal access token ties the release to one person's account, which is the likely
-reason the openshift one stopped working. The org runs a GitHub App for this sort of thing
-already, the one crane's `pr-closed.yaml` uses through `MIGTOOLS_BOT_ID` and
-`MIGTOOLS_BOT_KEY`. Prefer a token minted from that app if you are setting this up.
 
 ## Before you change behaviour
 
