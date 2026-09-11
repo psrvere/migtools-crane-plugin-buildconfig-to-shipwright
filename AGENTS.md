@@ -39,6 +39,11 @@ The original `crane convert` resolved ImageStreamTag/ImageStreamImage references
 GOTOOLCHAIN=auto go build -o crane-plugin-buildconfig-to-builds .
 ```
 
+A binary built that way reports its version to crane as `devel`. The release workflow is
+what stamps a real one, with
+`-ldflags "-X github.com/migtools/crane-plugin-buildconfig-to-builds/buildconfig.PluginVersion=<tag>"`,
+so `crane plugin-manager list --installed` saying `devel` means a local build, not a bug.
+
 Requires Go 1.25.6+ (forced by transitive dependencies, notably `shipwright-io/build v0.19.0`). Newer Shipwright releases (v0.20+) pull in k8s v0.36 and require Go 1.26; this module stays on Shipwright v0.19.0 / k8s v0.34 to remain buildable with the Go 1.25 toolchain. The pinned crane-lib pseudo-version (`v0.1.6-0.20260807130033-222a325c7cee`) provides the unreleased `NewResources` API — update this when crane-lib publishes a new release.
 
 ## Development tools (`hack/`)
@@ -52,6 +57,11 @@ When working with `hack/` scripts:
 - User-facing documentation in `hack/README.md` provides usage examples, but the scripts themselves are not hardened against all misuse scenarios
 
 This is intentional — `hack/` scripts trade robustness for maintainability and developer velocity. For production cluster setup, users should follow upstream documentation for Kubernetes, Tekton, and Shipwright.
+
+One file in here is none of the above. `write-plugin-index.py` runs from the release
+workflow, not from anyone's laptop, and what it writes becomes the manifest in
+`migtools/crane-plugins` that decides which binary a user downloads. Read it the way you
+read the workflows, not the way you read the Minikube scripts.
 
 ## Testing
 
@@ -78,6 +88,33 @@ Full end-to-end validation on real Minikube clusters. See [`hack/README.md`](hac
 **CI/CD:**
 
 Pull requests run automated E2E tests on Minikube via [`.github/workflows/test-e2e-minikube-pr.yml`](.github/workflows/test-e2e-minikube-pr.yml).
+
+## Releasing
+
+Two workflows, run by hand from the Actions tab, in this order.
+
+**Create release branch** takes a major and minor version, `0.1`, and opens `release-0.1`
+off main. crane's naming, so no leading `v`. Patch releases reuse the branch: `v0.1.0`,
+`v0.1.1` and the rest all come off `release-0.1`.
+
+**Release** runs on that branch and takes the full version, `v0.1.0`. It refuses to run
+anywhere but a `release-*` branch, and refuses a version whose series does not match the
+branch, so `v0.1.3` cannot be tagged on `release-0.2`. It builds the five platforms crane
+itself publishes, stamps the version, checks each binary carries it, writes checksums, and
+opens a **draft** release. Major versions are refused: this ships `0.x` until someone
+decides otherwise and edits the check.
+
+A draft creates no tag and serves no assets. Publishing it is what does both, and nothing
+downstream works until you do:
+
+- The entry in [migtools/crane-plugins](https://github.com/migtools/crane-plugins) is what
+  makes `crane plugin-manager add` work. The release opens that PR itself when a
+  `PLUGIN_RELEASE` secret exists, and otherwise prints how to do it by hand.
+  **Do not merge that PR before the release is published.** `plugin-manager add` does not
+  check the HTTP status of its download, so against an unpublished release it writes
+  GitHub's 404 page into the plugins directory as the plugin binary and reports success.
+- mta-crane pins this plugin in its `go.mod`. That bump needs the tag to exist, so it comes
+  after publishing too.
 
 ## Before you change behaviour
 
