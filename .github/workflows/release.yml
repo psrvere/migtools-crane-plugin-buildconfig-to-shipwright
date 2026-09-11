@@ -1,0 +1,139 @@
+name: Release
+
+# Run "Create release branch" first. This refuses to run anywhere but the
+# release branch that workflow makes, so a release can never be cut from main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish plugin binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the version and the branch agree
+        env:
+          VERSION: ${{ inputs.version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "version must look like v1.2.3, got '$VERSION'"; exit 1 ;;
+          esac
+
+          # main carries the next version, not a released one. Cutting a
+          # release from it would tag a moving target.
+          case "$BRANCH" in
+            release-*) ;;
+            *) echo "refusing to release from '$BRANCH'."
+               echo "Run the Create release branch workflow, then run this against release-X.Y."
+               exit 1 ;;
+          esac
+
+          # v0.1.3 belongs on release-0.1. Catching this here stops a patch
+          # landing on the wrong line.
+          series=${VERSION#v}
+          series=${series%.*}
+          if [ "$BRANCH" != "release-$series" ]; then
+            echo "$VERSION belongs on release-$series, but this is $BRANCH."
+            exit 1
+          fi
+
+      - name: Check out source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Refuse to reuse a tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "tag $VERSION already exists. Pick the next patch version."
+            exit 1
+          fi
+
+      - name: Verify go.mod is tidy
+        env:
+          GOPROXY: "https://proxy.golang.org"
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Run unit tests
+        env:
+          GOPROXY: "https://proxy.golang.org"
+        run: go test ./... -count=1
+
+      # plugin-manager matches os and arch exactly against the running machine,
+      # so a platform missing here is a platform that cannot install the plugin.
+      # These five are the set crane itself publishes.
+      - name: Build the plugin for every published platform
+        env:
+          GOPROXY: "https://proxy.golang.org"
+          VERSION: ${{ inputs.version }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p bin
+          ldflags="-X github.com/migtools/crane-plugin-buildconfig-to-builds/buildconfig.PluginVersion=${VERSION}"
+
+          while read -r os arch; do
+            out="bin/${arch}-${os}-buildconfigtobuildsplugin-${VERSION}"
+            if [ "$os" = "windows" ]; then
+              out="${out}.exe"
+            fi
+            echo "building $out"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$ldflags" -o "$out" .
+
+            # An ldflags path that stops matching the source silently leaves the
+            # placeholder in place, and the plugin then reports "devel" to crane
+            # for the rest of the release's life.
+            if ! strings "$out" | grep -Fq "$VERSION"; then
+              echo "$out does not carry $VERSION. Check the -X path against buildconfig.PluginVersion."
+              exit 1
+            fi
+          done <<'PLATFORMS'
+          linux amd64
+          linux arm64
+          darwin amd64
+          darwin arm64
+          windows amd64
+          PLATFORMS
+          ls -l bin
+
+      - name: Write checksums
+        run: |
+          cd bin
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          target_commitish: ${{ github.ref_name }}
+          name: ${{ inputs.version }}
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            bin/*
+          body: |
+            Plugin binaries for `crane plugin-manager`.
+
+            Installing this release needs a matching entry in the crane plugin
+            index at https://github.com/migtools/crane-plugins. Until that entry
+            merges, download the binary for your platform from this page and
+            point `crane transform` at it with `--plugin-dir`.

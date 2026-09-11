@@ -11,7 +11,14 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-const PluginVersion = "v0.1.0"
+// PluginVersion is what the plugin reports to crane in its metadata. The
+// release workflow overwrites it with the released version at link time:
+//
+//	go build -ldflags "-X github.com/migtools/crane-plugin-buildconfig-to-builds/buildconfig.PluginVersion=v0.1.0"
+//
+// A binary built any other way keeps the value below, so a development build
+// is never mistaken for a release.
+var PluginVersion = "devel"
 
 const (
 	RegistryMappingFlag      = "registry-mapping"

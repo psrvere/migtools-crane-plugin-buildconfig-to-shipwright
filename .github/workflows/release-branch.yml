@@ -1,0 +1,58 @@
+name: Create release branch
+
+# Releases are cut from a release branch, never from main, so main stays open
+# for the next version while a release is stabilised. Run this first, then run
+# the Release workflow against the branch it creates.
+#
+# The naming follows crane: release-X.Y, no leading v. Patch releases reuse the
+# same branch, so release-0.1 carries v0.1.0, v0.1.1 and everything after.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Major and minor version for the branch, e.g. 0.1. The branch becomes release-0.1."
+        required: true
+      git-ref:
+        description: "Ref to cut the branch from."
+        required: true
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  create-release-branch:
+    name: Create release branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ${{ inputs.git-ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref }}
+          fetch-depth: 0
+
+      - name: Create the branch and push it
+        env:
+          VERSION: ${{ inputs.version }}
+          GIT_REF: ${{ inputs.git-ref }}
+        run: |
+          case "$VERSION" in
+            [0-9]*.[0-9]*) ;;
+            v*) echo "drop the leading v: crane names these branches release-0.1, not release-v0.1"; exit 1 ;;
+            *) echo "version must be major.minor, like 0.1, got '$VERSION'"; exit 1 ;;
+          esac
+          case "$VERSION" in
+            *.*.*) echo "use major.minor only: patch releases reuse the same branch"; exit 1 ;;
+          esac
+
+          branch="release-$VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "$branch already exists. Cut patch releases from it rather than making a new branch."
+            exit 1
+          fi
+
+          git switch -c "$branch"
+          git push origin "$branch"
+          echo "Created $branch from $GIT_REF at $(git rev-parse --short HEAD)."
+          echo "Bump PluginVersion on $branch, then run the Release workflow against it."
