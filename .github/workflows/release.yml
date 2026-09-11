@@ -9,6 +9,9 @@ on:
       version:
         description: "Version to release, e.g. v0.1.0."
         required: true
+      previous-version:
+        description: "Release to compare against for the notes, e.g. v0.1.2. Leave empty and GitHub picks the preceding tag, which is usually right."
+        required: false
 
 permissions:
   contents: write
@@ -153,6 +156,34 @@ jobs:
           sha256sum * > checksums.txt
           cat checksums.txt
 
+      # GitHub writes the changelog from the commits between the previous tag
+      # and this one, and picks that previous tag itself when nothing says
+      # otherwise. On the very first release there is no previous tag, so it
+      # reaches back to the first commit: every dependabot bump and every
+      # agent-skill PR this repo has ever merged, which is nobody's changelog.
+      - name: Work out what the notes compare against
+        id: notes
+        env:
+          PREVIOUS: ${{ inputs.previous-version }}
+        run: |
+          if [ -n "$PREVIOUS" ]; then
+            if ! git rev-parse -q --verify "refs/tags/$PREVIOUS" >/dev/null; then
+              echo "previous-version '$PREVIOUS' is not a tag here. Check the spelling against the releases page."
+              exit 1
+            fi
+            echo "comparing against $PREVIOUS"
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+            echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+          elif [ -n "$(git tag --list 'v*')" ]; then
+            echo "letting GitHub pick the preceding tag"
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+            echo "previous=" >> "$GITHUB_OUTPUT"
+          else
+            echo "no tag exists yet, so this is the first release: writing no changelog"
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+            echo "previous=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
@@ -160,7 +191,8 @@ jobs:
           target_commitish: ${{ github.ref_name }}
           name: ${{ inputs.version }}
           draft: true
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.notes.outputs.generate }}
+          previous_tag: ${{ steps.notes.outputs.previous }}
           fail_on_unmatched_files: true
           files: |
             bin/*
