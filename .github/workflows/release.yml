@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0. Must match PluginVersion in buildconfig/plugin.go."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish plugin binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # crane never checks the plugin binary's self-reported version against the
+      # index, so a release tagged differently from the constant goes unnoticed
+      # until someone reads `crane plugin-manager list --installed`. Fail here
+      # instead.
+      - name: Check the version matches the source
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "version must look like v1.2.3, got '$VERSION'"; exit 1 ;;
+          esac
+          source_version=$(grep -oE 'PluginVersion = "[^"]+"' buildconfig/plugin.go | cut -d'"' -f2)
+          if [ "$source_version" != "$VERSION" ]; then
+            echo "buildconfig/plugin.go says PluginVersion = \"$source_version\", release asks for \"$VERSION\"."
+            echo "Bump the constant and merge that first."
+            exit 1
+          fi
+
+      - name: Verify go.mod is tidy
+        env:
+          GOPROXY: "https://proxy.golang.org"
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Run unit tests
+        env:
+          GOPROXY: "https://proxy.golang.org"
+        run: go test ./... -count=1
+
+      # plugin-manager matches os and arch exactly against the running machine,
+      # so a platform missing here is a platform that cannot install the plugin.
+      # These five are the set crane itself publishes.
+      - name: Build the plugin for every published platform
+        env:
+          GOPROXY: "https://proxy.golang.org"
+          VERSION: ${{ inputs.version }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p bin
+          while read -r os arch; do
+            out="bin/${arch}-${os}-buildconfigtobuildsplugin-${VERSION}"
+            if [ "$os" = "windows" ]; then
+              out="${out}.exe"
+            fi
+            echo "building $out"
+            GOOS="$os" GOARCH="$arch" go build -o "$out" .
+          done <<'PLATFORMS'
+          linux amd64
+          linux arm64
+          darwin amd64
+          darwin arm64
+          windows amd64
+          PLATFORMS
+          ls -l bin
+
+      - name: Write checksums
+        run: |
+          cd bin
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Publish the release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "bin/*"
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          draft: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ inputs.version }}
+          name: ${{ inputs.version }}
+          body: |
+            Plugin binaries for `crane plugin-manager`.
+
+            Installing this release needs a matching entry in the crane plugin
+            index at https://github.com/migtools/crane-plugins. Until that entry
+            merges, download the binary for your platform from this page and
+            point `crane transform` at it with `--plugin-dir`.
