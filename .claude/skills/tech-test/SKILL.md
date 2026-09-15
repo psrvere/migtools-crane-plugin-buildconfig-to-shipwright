@@ -230,9 +230,14 @@ git merge-base --is-ancestor "<sha>" origin/main && echo "already on main"
 
 ## U5 — Unit tests
 
+Two suites, split by build tag: the functional tests, and the documentation tests behind
+`-tags documentation`. Run both; each maps to its own CI workflow (`go.yml`, `documentation.yml`).
+
 ```bash
 GOWORK=off go test ./... -count=1
-echo "exit=$?"
+echo "functional exit=$?"
+GOWORK=off go test -tags documentation ./buildconfig -count=1
+echo "documentation exit=$?"
 ```
 
 Note: if an output-filtering proxy is in play, counting `--- PASS` lines yields 0 because the

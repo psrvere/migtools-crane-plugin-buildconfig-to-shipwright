@@ -1,0 +1,29 @@
+name: Documentation tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  documentation:
+    name: Documentation tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run documentation tests
+        env:
+          GOPROXY: "https://proxy.golang.org"
+          GOWORK: off
+        run: go test -v -tags documentation ./buildconfig

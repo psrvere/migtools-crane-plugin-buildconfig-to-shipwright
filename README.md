@@ -261,7 +261,8 @@ to the target registry. The plugin warns either way.
 
 Building crane and the plugin from source, the three levels of tests, and setting up a
 Minikube cluster with Tekton and Shipwright are in [hack/README.md](hack/README.md) and
-[AGENTS.md](AGENTS.md). Pull requests run the unit tests and the cluster E2E.
+[AGENTS.md](AGENTS.md). Pull requests run the unit tests, the documentation tests, and the
+cluster E2E.
 
 ## Issue tracking
 

@@ -113,8 +113,8 @@ skip it.**
 | An `Outcome*` state or a `*Annotation` constant, or a change to what a passed-through BuildConfig carries (`passThroughWithDisposition`) | `docs/support-matrix.md` › How to read this page, What the plugin writes; `docs/architecture.md` › Outcomes, and where they are recorded; `README.md` › What it does, Conversion example (its output YAML); `AGENTS.md` › How it works (the per-resource list of what the plugin returns) | `TestSupportMatrixCoversEveryWarning` (constants clause) |
 | A non-test Go file added, deleted, or renamed; a `process*` method on `Converter` added, removed, or renamed; a change to the call order inside `Convert` | `docs/architecture.md` › The conversion, step by step, The files; `AGENTS.md` › the file lists under "Files you may own fully" and "Files where the maintainer reads your diff line by line" (once PR #71 lands) | `TestArchitectureDocNamesEveryFileAndStage`, `TestArchitectureDocSymbolsExist` |
 | A `Test*` function removed or renamed | `docs/architecture.md` › Rules that must stay true (each rule cites the test that keeps it) | `TestInvariantsCiteRealTests` |
-| A new test guarding a doc (`*_doc_test.go`, `readme_test.go`, `support_matrix_test.go`, `adr_test.go`, `examples_test.go`) | `AGENTS.md` › When a documentation test fails (one row per test, once PR #71 lands) | none |
-| Any change that moves what the plugin emits for an input (`processOutput`, `processSource`, `generateServiceAccount`, `toUnstructured`, `stripSerializationNoise`, an annotation, a name) | `docs/examples/<x>/expected/` regenerated **after approval** with `go test ./buildconfig -run TestExamplesMatchCommittedOutput -update`, then that example's `README.md` re-read and re-proposed; `README.md` › Conversion example (its output YAML) | `TestExamplesMatchCommittedOutput` |
+| A new test guarding a doc (`*_doc_test.go`, all carry `//go:build documentation`) | `AGENTS.md` › When a documentation test fails (one row per test, once PR #71 lands) | none |
+| Any change that moves what the plugin emits for an input (`processOutput`, `processSource`, `generateServiceAccount`, `toUnstructured`, `stripSerializationNoise`, an annotation, a name) | `docs/examples/<x>/expected/` regenerated **after approval** with `go test -tags documentation ./buildconfig -run TestExamplesMatchCommittedOutput -update`, then that example's `README.md` re-read and re-proposed; `README.md` › Conversion example (its output YAML) | `TestExamplesMatchCommittedOutput` |
 | A rule the code must keep obeying was decided in the design doc or the PR (never overwrite X, always warn on Y, one path for Z) | new `docs/adr/NNNN-<slug>.md` with the same parts as its siblings, a row in `docs/adr/README.md`, and the rule in `docs/architecture.md` › Rules that must stay true | `TestADRsAreWellFormed` (shape only; nothing checks that a decision got a record) |
 | The strategy switch in `converter.go` (`Docker`, `Source`, `Custom`, `JenkinsPipeline`), or the output gate | `README.md` › Strategy support and What it does; `AGENTS.md` › How it works; `docs/support-matrix.md` › What stops a BuildConfig from converting | none |
 | `processStrategyVolumes`, `convertBuildVolumeSource`, the `UndefinedVolume` warning, the `:ro` mount text | `docs/volume-migration.md`; `docs/support-matrix.md` › the volumes rows | `TestSupportMatrixCoversEveryWarning` for the warning text |
@@ -295,7 +295,7 @@ any doc, so the proposals start from what CI would say:
 
 ```bash
 KEEPERS='TestSupportMatrix|TestArchitectureDoc|TestInvariants|TestExamples|TestReadme|TestADRs|TestNoDirectWarn|TestDirectWarn'
-cd "$WORK" && GOWORK=off go test ./buildconfig -run "$KEEPERS" -count=1 2>&1 \
+cd "$WORK" && GOWORK=off go test -tags documentation ./buildconfig -run "$KEEPERS" -count=1 2>&1 \
   | grep -E 'FAIL|^ok|^---|\.go:[0-9]+:|^[[:space:]]{8,}|^#' | tee "$SCRATCH/keeper.txt"
 ```
 
@@ -535,9 +535,10 @@ For each approved block, make the edit in `$WORK` and append its path to
    ```bash
    cd "$WORK"
    if grep -qE '\.go$|docs/examples/.*/expected/' "$SCRATCH/edited.txt"; then
-     GOWORK=off go test ./... -count=1 2>&1
+     { GOWORK=off go test ./... -count=1
+       GOWORK=off go test -tags documentation ./buildconfig -count=1; } 2>&1
    else
-     GOWORK=off go test ./buildconfig -run "$KEEPERS" -count=1 2>&1
+     GOWORK=off go test -tags documentation ./buildconfig -run "$KEEPERS" -count=1 2>&1
    fi | grep -E 'FAIL|^ok|^---|\.go:[0-9]+:|^[[:space:]]{8,}|^#' | tee "$SCRATCH/verify.txt"
    ```
 

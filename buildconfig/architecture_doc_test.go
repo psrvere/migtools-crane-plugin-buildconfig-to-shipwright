@@ -1,3 +1,5 @@
+//go:build documentation
+
 package buildconfig
 
 import (

@@ -60,15 +60,23 @@ This is intentional — `hack/` scripts trade robustness for maintainability and
 
 ## Testing
 
-The project uses a three-level testing strategy:
+The project uses a three-level testing strategy, plus a documentation suite that runs on its own build tag:
 
 ### 1. Unit Tests
-Standard Go tests at the method level:
+Standard Go tests at the method level. Every functional test file carries `//go:build !documentation`, so the default build runs this suite and leaves the documentation tests out:
 
 ```bash
 GOTOOLCHAIN=auto go test ./...
 ```
 
+### Documentation Tests
+The doc-consistency tests (support matrix, architecture page, examples, README, ADRs) carry `//go:build documentation`, so the run above skips them. Run them with the tag, the way [`.github/workflows/documentation.yml`](.github/workflows/documentation.yml) does:
+
+```bash
+GOTOOLCHAIN=auto go test -tags documentation ./buildconfig
+```
+
+The two suites never overlap: a red documentation check names a doc to fix and does not turn the functional run red, and a functional failure does not block the documentation run.
 
 ### 2. Plugin E2E Tests
 Tests the plugin binary with crane, processing input YAMLs and asserting output transformations:
@@ -146,8 +154,10 @@ read line by line. The architecture page's file table says the same thing: `chai
 
 Nothing else. In particular this list does not cover `hack/*` or `buildconfig/*_test.go`,
 because CI executes both: `.github/workflows/test-e2e-minikube-pr.yml` runs the `hack/`
-setup scripts, and `.github/workflows/go.yml` runs `go test ./...`, which compiles every
-test file. Code that runs on the CI runner is read line by line.
+setup scripts, `.github/workflows/go.yml` runs `go test ./...` for the functional suite,
+and `.github/workflows/documentation.yml` runs `go test -tags documentation ./buildconfig`
+for the doc suite. Between the two Go workflows every test file compiles and runs. Code
+that runs on the CI runner is read line by line.
 
 ## Files where the maintainer reads your diff line by line
 
@@ -179,6 +189,10 @@ not reword a warning without saying which matrix row moves.
 
 These tests guard the docs. A red one means a doc to update, not a test to weaken.
 
+They carry `//go:build documentation`, so `go test ./...` skips them; run them with
+`go test -tags documentation ./buildconfig`, which is what `.github/workflows/documentation.yml`
+does on every PR.
+
 Every test in the table exists on `main`, or arrives with the PR that adds its row. Six
 landed with the documentation PRs (#64, #65, #66 to #68, #70).
 
@@ -187,7 +201,7 @@ landed with the documentation PRs (#64, #65, #66 to #68, #70).
 | `TestSupportMatrixCoversEveryWarning` | every warning template has a row in the matrix, and every quoted warning still exists | add or reword the row in `docs/support-matrix.md`. To retire a warning, keep its row and start the cell with `Retired by BUILD-` and the story number. Put no backticks anywhere in that cell: a backtick-quoted string is read as a live warning template, and the row then fails the doc-to-code check instead |
 | `TestArchitectureDocNamesEveryFileAndStage` | every non-test Go file and every `process*` method is named in the architecture page | add the line |
 | `TestInvariantsCiteRealTests` | every test the architecture page cites exists | rename it in the page, or restore the test |
-| `TestExamplesMatchCommittedOutput` | each `docs/examples/*/expected/` matches the plugin's output | `go test ./buildconfig -run TestExamplesMatchCommittedOutput -update` (once #66 to #68 land; the flag does not exist before that), then re-read that example's README. A regenerated expectation is a changed assertion, so it is read line by line like any other golden file |
+| `TestExamplesMatchCommittedOutput` | each `docs/examples/*/expected/` matches the plugin's output | `go test -tags documentation ./buildconfig -run TestExamplesMatchCommittedOutput -update` (once #66 to #68 land; the flag does not exist before that), then re-read that example's README. A regenerated expectation is a changed assertion, so it is read line by line like any other golden file |
 | `TestReadmeOptionalFlagsAreValidJSON`, `TestReadmeVersionsMatchPins` | README flag examples are JSON; the Shipwright version in the README, the Go version in this file, and the crane commit in `hack/README.md` match `go.mod`, the Minikube script and the CI workflow | fix whichever page the failure names |
 | `TestTriggerRunbookYAMLParses` | every `yaml` block in `docs/trigger-migration.md` is a document `kubectl apply` could read | fix the block; the failure names its line |
 | `TestADRsAreWellFormed` | every record has its parts and is in the index | fix the record |
@@ -201,8 +215,9 @@ landed with the documentation PRs (#64, #65, #66 to #68, #70).
   `.github/workflows/test-e2e-minikube-pr.yml` pins and put it first on `PATH` before running
   `tests/e2e-transform.sh`. Users install a crane release and add the plugin with
   `crane plugin-manager add`; the README covers that.
-- Run the Go suite as CI does: `GOWORK=off go test ./... -count=1`. The workspace `go.work`
-  outside this repo can resolve different dependency versions.
+- Run the Go suite as CI does: `GOWORK=off go test ./... -count=1` for the functional suite,
+  and `GOWORK=off go test -tags documentation ./buildconfig -count=1` for the doc suite. The
+  workspace `go.work` outside this repo can resolve different dependency versions.
 - On OpenShift, `kubectl get build/<name>` is the OpenShift Build API. Write
   `build.shipwright.io/<name>`.
 - A BuildRun with `serviceAccount` unset runs as the namespace `pipeline` account. That is

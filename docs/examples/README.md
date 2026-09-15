@@ -17,12 +17,12 @@ Every folder has the same shape:
 - `README.md`, the walkthrough.
 
 The `expected/` files are not hand-written. `TestExamplesMatchCommittedOutput` in
-`buildconfig/examples_test.go` runs the plugin over every folder on each CI run and fails
+`buildconfig/examples_doc_test.go` runs the plugin over every folder on each CI run and fails
 if the output no longer matches. When a change in the plugin moves an example, regenerate
 it and re-read its README:
 
 ```bash
-go test ./buildconfig -run TestExamplesMatchCommittedOutput -update
+go test -tags documentation ./buildconfig -run TestExamplesMatchCommittedOutput -update
 ```
 
 Every example was run on an OpenShift cluster with the Builds for Red Hat OpenShift operator:
