@@ -1,6 +1,6 @@
 ---
 name: address-review-fix
-model: sonnet
+model: opus
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: tech-review
-description: Pre-PR review gate for a migration branch. Runs /simplify, then parallel reviewers (coderabbit and qodo CLIs, built-in /code-review, conditional ce-code-review), an adversarial challenger over blockers, and five cross-repo consistency checks against this repo and strategy-catalog. Report-only by default. Trigger on "tech-review", "review BUILD-XXXX", "review this branch", or "pre-PR review". Reviews a local branch before a PR is merged; use /deep-review to review an open PR.
+description: Pre-PR review gate for a migration branch. Runs an Opus simplify pass, then parallel reviewers (coderabbit and qodo CLIs, an Opus code review, an Opus docs pass), an adversarial challenger over blockers, and five cross-repo consistency checks against this repo and strategy-catalog. Every sub-agent names its model, capped at Opus. Report-only by default. Trigger on "tech-review", "review BUILD-XXXX", "review this branch", or "pre-PR review". Reviews a local branch before a PR is merged; use /deep-review to review an open PR.
 argument-hint: <PR-URL | BUILD-XXXX | branch-name | blank> [--fix] [--cli=<name|none>]
 allowed-tools: [Bash, Read, Grep, Glob, Edit, Agent, AskUserQuestion]
 user_invocable: true
@@ -32,8 +32,8 @@ If the user asks to review an open PR, or someone else's PR, say so and point at
    the diff without switching. This checkout may be shared with another session; a
    `git checkout` or `git stash` here can destroy work that is not yours.
 2. **All edits happen in a disposable worktree, never the user's checkout.** This skill
-   reports; findings go to the terminal. `/simplify` (always) and `--fix` (on request)
-   edit an isolated worktree of the branch created in Stage 0f — so the default path
+   reports; findings go to the terminal. The simplify pass (when the diff has Go) and
+   `--fix` (on request) edit an isolated worktree of the branch created in Stage 0f — so the default path
    leaves the user's repo byte-for-byte unchanged, and rollback is `git worktree remove`.
    Nothing is committed, pushed, or written to Jira.
 3. **Baseline is fetched `origin/main`, never local `main`.** A stale local main
@@ -47,6 +47,16 @@ If the user asks to review an open PR, or someone else's PR, say so and point at
    reporting an absence.
 7. **A step that did not run says so.** Never let a skipped reviewer look like a clean
    one.
+8. **Under worktree isolation, a multi-statement stage goes into a script file first.** The
+   session refuses inline loops, shell variables and heredocs that reach git, and a refused
+   command is a stage that did not run. Write it to `$SCRATCH/<stage>.sh` and run that.
+9. **Every sub-agent dispatch passes `model`, and the ceiling is `opus`.** An omitted model
+   inherits the session's, which may sit above Opus; that is a bug, not a default. A
+   built-in Skill forks on the model of whoever invokes it: the session's when invoked
+   here, which cannot be capped, or the sub-agent's when invoked from inside one. So this
+   skill never invokes a Skill itself. `code-review` forks the built-in `/code-review`
+   from inside an Opus sub-agent; `simplify` and `tech-document` are Opus sub-agents
+   that do the work.
 
 ## Arguments
 
@@ -193,13 +203,6 @@ done
 
 Record both results. They go in the compliance report whether present or not.
 
-Do not probe for skills this way. `/code-review`, `/simplify` and `ce-code-review` are
-not files on disk, and inspecting a plugin cache path would hardcode a home directory,
-depend on Claude Code internals, and still not reveal whether a plugin is *enabled*.
-Their availability surfaces when you invoke them: all three are Skill-backed and run at the
-orchestrator level (Stages 2 and 3), so a failed or unavailable invocation is visible to you
-directly — record it as `unavailable`/`failed`, never a clean pass.
-
 ### 0e. Find the design doc
 
 ```bash
@@ -214,10 +217,10 @@ the output which it chose.
 ### 0f. Create the review worktree
 
 Every stage that reads or edits code runs against a disposable worktree of the branch,
-not the shared checkout. This is what keeps the default path report-only: `/simplify` and
-`--fix` edit the worktree, so the user's repo is never touched and rollback is a single
-`git worktree remove`. It also fixes the review target — the worktree is the one
-immutable copy every reviewer sees, even after `/simplify` edits it.
+not the shared checkout. This is what keeps the default path report-only: the simplify
+pass and `--fix` edit the worktree, so the user's repo is never touched and rollback is a
+single `git worktree remove`. It also fixes the review target — the worktree is the one
+immutable copy every reviewer sees, even after the simplify pass edits it.
 
 ```bash
 SLUG="$(printf '%s' "$BRANCH" | tr '/' '-')"   # a fork-only ref is "fork/BUILD-1234"; keep it out of paths
@@ -229,7 +232,7 @@ git worktree add --detach "$WT" "$BRANCH"
 and the worktree starts at the branch tip, so the review target is:
 
 ```bash
-git -C "$WT" diff --no-ext-diff "$BASE"    # BASE → worktree tree, including /simplify's edits
+git -C "$WT" diff --no-ext-diff "$BASE"    # BASE → worktree tree, including the simplify pass's edits
 ```
 
 Also create the scratchpad — one directory where every reviewer writes its findings JSON
@@ -278,23 +281,26 @@ them twice. Report pending cluster evidence rather than blocking on it.
 
 ## Stage 2: Simplify
 
-**Invoke `/simplify` at the orchestrator level, not as a wrapped sub-agent** — for the same
-reason `ce-code-review` is (see Stage 3). `/simplify` is itself a fan-out skill: it spawns
-its own altitude / reuse / simplification reviewers. Wrapped in a general-purpose sub-agent
-(the old `reviewers/simplify.md` dispatch), that wrapper returns before its grandchildren
-finish and writes no `simplify.json` — the pass silently produces nothing and its edits
-never land in the worktree the Stage 3 reviewers see. So **you (the orchestrator) invoke the
-`/simplify` Skill directly**, with the working directory set to the review worktree `$WT`,
-and follow `reviewers/simplify.md` yourself as your own instructions. Block on it before
-Stage 3.
+Skip this stage when the diff has no non-test Go lines (`GO_LINES` from Stage 0b is 0) and
+record `skipped: no code in diff`. A simplification pass over Markdown finds nothing and
+costs a full read of every file.
+
+Otherwise dispatch one sub-agent from `reviewers/simplify.md` with `model: opus`, the
+worktree path `$WT`, the merge base and the scratchpad `$SCRATCH`. It performs the pass
+itself: reuse of helpers that already exist, dead code, duplicated branches, abstraction
+the diff does not need. It does not invoke the built-in `/simplify`: the pass is small
+enough to do directly, and the fork-inside-a-sub-agent pattern `code-review` uses (Stage 3)
+is reserved for the one reviewer whose built-in depth has earned its cost. Block on it
+before Stage 3.
 
 It runs first on purpose: its edits land in the worktree's diff, so the Stage 3 reviewers
 review them too. Run it last and nothing checks its output. It is the only reviewer that
-changes files — and it changes them only inside `$WT`, never the user's checkout.
+changes files, and it changes them only inside `$WT`, never the user's checkout. Nothing
+is committed and no patch is carried anywhere: the edits sit in `$WT`, uncommitted, which
+is the one tree every reviewer reads.
 
-If `/simplify` cannot be invoked at all on this deployment, record it `unavailable` in the
-report — never a clean pass. Do not simplify by hand; that is a different act with different
-risk.
+If it returns nothing or `$SCRATCH/simplify.json` is missing, record it `failed` in the
+report, never a clean pass.
 
 After it completes, run the unit tests in the worktree:
 
@@ -302,46 +308,51 @@ After it completes, run the unit tests in the worktree:
 cd "$WT" && GOWORK=off go test ./... -count=1
 ```
 
-`GOWORK=off` is what CI builds. A failure means `/simplify` broke the branch: discard its
+`GOWORK=off` is what CI builds. A failure means the pass broke the branch: discard its
 edits with `git -C "$WT" checkout -- .`, report that they were dropped and why, and
 continue to Stage 3 without them. The worktree makes this safe — it holds nothing but the
-branch and `/simplify`'s edits, so a blanket discard cannot touch anyone else's work.
+branch and the pass's edits, so a blanket discard cannot touch anyone else's work.
 
 ---
 
 ## Stage 3: Reviewers
 
-**Which reviewers are sub-agents and which run at the orchestrator level.** A reviewer that
-is *just a bash tool* (the CLI reviewers) runs fine wrapped in a sub-agent. A reviewer that
-*invokes a Skill* does not: `/code-review` and `ce-code-review` cannot be invoked from a
-sub-agent at all where the harness disables model invocation for sub-agents (`/code-review`
-returned exactly this in practice — "cannot be invoked via Skill tool
-(disable-model-invocation)"), and `ce-code-review` additionally fans out and returns before
-its children finish. So the rule is: **the three Skill-backed reviewers, `/code-review`,
-`ce-code-review`, and `/tech-document`, run at the orchestrator level; only the CLI reviewers
-are dispatched as sub-agents.** (`/simplify`, also Skill-backed, is already orchestrator-level in Stage 2.)
+**Every reviewer is a sub-agent with an explicit `model` capped at `opus` (iron rule 9).**
+A built-in Skill invoked from the session forks on the session's model, which cannot be
+capped. Invoked from inside a sub-agent it forks on that sub-agent's model: tested on
+2026-09-16, a sub-agent's Skill call to `/code-review` launched the fork, ran it, and got
+the findings back on a second wake-up. So `code-review` is an Opus sub-agent that forks
+the built-in `/code-review` at `low` effort and maps its findings; `simplify` is an Opus
+sub-agent that performs the pass itself; `tech-document` is an Opus sub-agent running
+that skill's report mode. Nothing runs on the session model. Security depth is
+`/deep-review`'s job at PR time; this gate has no persona fan-out.
 
-| Reviewer | How to run | Prompt / instructions | When |
-|---|---|---|---|
-| `cli-review` (coderabbit) | **sub-agent** | `reviewers/cli-review.md` | `coderabbit` on PATH and not excluded by `--cli` |
-| `cli-review` (qodo) | **sub-agent** | `reviewers/cli-review.md` | `qodo` on PATH and not excluded by `--cli` |
-| `code-review` | **orchestrator-level** (invoke `/code-review` yourself) | `reviewers/code-review.md` | Always |
-| `ce-code-review` | **orchestrator-level** (invoke the Skill yourself) | `reviewers/ce-code-review.md` | Escalation threshold met — see below |
-| `tech-document` | **orchestrator-level** (invoke `/tech-document "$BRANCH" --report --work "$WT"` yourself) | its own `--report` contract | Always |
+| Reviewer | How to run | Prompt / instructions | Model | When |
+|---|---|---|---|---|
+| `cli-review` (coderabbit) | **sub-agent** | `reviewers/cli-review.md` | sonnet | `coderabbit` on PATH and not excluded by `--cli` |
+| `cli-review` (qodo) | **sub-agent** | `reviewers/cli-review.md` | sonnet | `qodo` on PATH and not excluded by `--cli` |
+| `code-review` | **sub-agent** that forks the built-in `/code-review "$BRANCH" low` | `reviewers/code-review.md` | opus | Always |
+| `tech-document` | **sub-agent** | the body of `.claude/skills/tech-document/SKILL.md`, with the argument line `<branch> --report --work "$WT"` | opus | Always |
 
-`/tech-document` maps the branch diff to the docs it touches, runs the documentation tests, and
-writes findings in the `findings-schema.md` shape with `source: tech-document`. It writes to
-its own scratch and returns the path on one line; copy that file to `$SCRATCH/tech-document.json`
-so Stage 6 reads it with the others. Running it here rather than in Stage 5 puts its
-findings through the same pipeline as every reviewer's: a red documentation test arrives as
-a `blocker` and the Stage 4 challenger confirms it by running the named test; stale prose
-arrives as a `warning`; a sentence already wrong on `$BASE` is scoped `pre-existing` and
-never blocks. `/tech-document` ships in this repo, so it is never `unavailable`; if it returns
-`BLOCKED` or nothing, record it as `failed`.
+`tech-document` maps the branch diff to the docs it touches, runs the documentation tests,
+and writes findings in the `findings-schema.md` shape with `source: tech-document`. It
+writes to its own scratch and returns the path on one line; tell the sub-agent to copy that
+file to `$SCRATCH/tech-document.json` before it returns, so Stage 6 reads it with the
+others. Running it here rather than in Stage 5 puts its findings through the same pipeline
+as every reviewer's: a red documentation test arrives as a `blocker` and the Stage 4
+challenger confirms it by running the named test; stale prose arrives as a `warning`; a
+sentence already wrong on `$BASE` is scoped `pre-existing` and never blocks. The skill
+ships in this repo, so it is never `unavailable`; if the sub-agent returns `BLOCKED` or
+nothing, record it as `failed`.
 
-Dispatch the **CLI sub-agents in one message** so they run in parallel; run the
-orchestrator-level reviewers yourself alongside them. Each writes its findings JSON to
-`$SCRATCH` and (for sub-agents) returns only a count.
+Dispatch **every sub-agent in one message** so they run in parallel. Each writes its
+findings JSON to `$SCRATCH` and returns only a count.
+
+`code-review` returns twice: once when its fork launches (`code-review: launched,
+waiting`), and once when the fork has finished and it has written
+`$SCRATCH/code-review.json`. Only the file counts. Wait for its second return, or watch
+for the file with the Monitor tool; a verdict built on the first return records
+`code-review` as `failed`.
 
 Resolve the prompt directory once:
 
@@ -349,14 +360,10 @@ Resolve the prompt directory once:
 SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/tech-review"
 ```
 
-For the **CLI sub-agents**, read the file's body and pass it as the sub-agent prompt with
-`subagent_type: general-purpose`; these files are prompt content, not registered agents.
-For the **orchestrator-level reviewers**, read `reviewers/code-review.md` and
-`reviewers/ce-code-review.md` as your *own* instructions: invoke the Skill directly with the
-working directory set to `$WT`, block on it, and map its findings into the schema yourself.
-`/tech-document --report` writes the schema itself; only the copy into `$SCRATCH` is yours.
-Map the `model:` field in each sub-agent file's frontmatter to the Agent tool's `model`
-parameter.
+For every sub-agent, read the prompt file's body and pass it as the sub-agent prompt with
+`subagent_type: general-purpose` and the `model` from the table above, which matches the
+`model:` field in the file's frontmatter; these files are prompt content, not registered
+agents.
 
 **Model-availability fallback.** If a dispatch fails because the requested model is not
 available to sub-agents on this deployment (e.g. an Opus session model that sub-agents
@@ -371,31 +378,11 @@ path `$WT` (their working directory and the single review target), the scratchpa
 Reviewers read and run against `$WT`, never the shared checkout — so even a CLI tool that
 writes can only touch the throwaway worktree.
 
-### ce-code-review escalation
-
-Evaluate **before** dispatching, so a small diff costs nothing. Dispatch only when any
-of these hold:
-
-- 100 or more changed lines
-- the diff touches secrets, `ServiceAccount`, RBAC or `ClusterRole`
-- the diff modifies Shipwright API types
-
-Below the threshold, record `SKIPPED — below threshold` and name which conditions were
-checked. It is a fan-out inside a fan-out, spawning six to fourteen personas, and
-`/deep-review` performs the deep multi-persona pass at PR time.
-
-**Dispatch it at the orchestrator level, not as a wrapped sub-agent.** `ce-code-review` is
-itself a fan-out skill: it spawns its own pool of persona sub-agents. If you wrap it in a
-general-purpose sub-agent (the `reviewers/ce-code-review.md` prompt), that wrapper returns
-before its grandchildren finish and never writes the JSON — the escalation silently
-produces nothing. Instead, **you (the orchestrator) invoke `compound-engineering:ce-code-review`
-directly via the Skill tool**, with `mode:agent base:<merge-base>`, run with the current
-working directory set to the review worktree `$WT` so it diffs the right tree. Block on its
-result, then map its findings into the schema yourself. It does not need — and must not
-get — an extra agent layer around it. (If a future harness makes a wrapper unavoidable, the
-wrapper must poll `$SCRATCH/ce-code-review.json` until it appears rather than ending its
-turn early.) The other Stage 3 reviewers stay as parallel sub-agents; only this one is
-promoted to a direct orchestrator call.
+There is no escalation tier. An earlier version dispatched `compound-engineering:ce-code-review`
+above 100 changed Go lines; it spawned six to fourteen personas on the session model,
+could not be capped, and duplicated the multi-persona pass `/deep-review` runs at PR time.
+A diff that touches secrets, `ServiceAccount`, RBAC or the Shipwright API types is named
+in the NOTES section of the verdict so the PR reviewer knows to run `/deep-review`.
 
 ---
 
@@ -481,6 +468,22 @@ git diff --no-ext-diff --name-only "$BASE" "$BRANCH" \
 For each implementation file changed, check whether its `_test.go` sibling also changed.
 Implementation without tests is a **warning**.
 
+Then the golden check. When the diff touches a non-test file under `buildconfig/` and changes
+what the plugin emits or accepts (a source, a param, a resource, an outcome), list what
+changed under `tests/testdata/`:
+
+```bash
+git -C "$WT" diff --no-ext-diff --name-only "$BASE" | grep -E '^tests/testdata/'
+```
+
+Empty output is a **warning**: a conversion change with no new or changed golden. A diff that
+only rewords a warning is exempt, since the documentation test covers the text. Report a
+golden that was clearly written by hand (a value the plugin does not emit, a missing
+annotation the plugin always writes) as a warning too.
+
+_(Origin: BUILD-2475. The rejection it reversed had a unit test asserting the rejection and
+no golden, and the check above would have flagged the branch that introduced it.)_
+
 ### 5e. Design doc completeness
 
 If a design doc was found in Stage 0e, compare the repos it plans to change against the
@@ -507,8 +510,7 @@ Consolidation reads disk, not conversation context, so it survives compaction.
 
 **First, account for every reviewer you dispatched.** For each one, a `$SCRATCH/<source>.json`
 must exist. A dispatched reviewer with no file is `failed` — name it in the report as such
-and never let its absence read as a clean zero. (This is exactly how the ce-code-review
-escalation failed silently before it was promoted to a direct orchestrator call.) A CLI
+and never let its absence read as a clean zero. A CLI
 reviewer whose file reports `ok` with empty findings but whose own note says it saw no diff
 or no changed files — while the Stage 0b diff is non-empty — is also `failed`/degraded, not
 a clean pass; re-run it or report it degraded. Do not build the verdict until every
@@ -536,11 +538,11 @@ Design doc:  <filename or "none">
 Evidence:    current | stale | none
 
 Reviewers:
-  simplify        <N changes applied | reverted: tests failed | unavailable>
+  simplify        <N changes applied | reverted: tests failed | skipped: no code in diff | failed>
   coderabbit      <N findings | absent>
   qodo            <N findings | absent>
-  /code-review    <N findings>
-  ce-code-review  <N findings | skipped: below threshold | unavailable>
+  code-review     <N findings | failed>
+  tech-document   <N findings | failed>
   challenger      <N blockers upheld, M removed | no blockers to review>
 
 BLOCKERS
@@ -562,7 +564,7 @@ CROSS-REPO
   5d tests     <result>
   5e design    <result>
 
-APPLIED BY /simplify (in the review worktree — your checkout is untouched)
+APPLIED BY THE SIMPLIFY PASS (in the review worktree — your checkout is untouched)
   <file> — what changed
   To keep these: git -C <your repo> apply <patch printed below>
 
@@ -613,7 +615,7 @@ With `--fix`, edits still land in the worktree `$WT`, never the user's checkout:
 3. Apply only what was approved, in `$WT`.
 4. Re-run `cd "$WT" && GOWORK=off go test ./... -count=1`. If it fails, discard the last
    change in the worktree and report; never emit a patch that breaks the build.
-5. Emit the combined patch (`/simplify` + approved fixes) so the user or `/tech-implement`
+5. Emit the combined patch (the simplify pass + approved fixes) so the user or `/tech-implement`
    can apply it to the real checkout:
 
    ```bash
@@ -637,12 +639,13 @@ Do not commit and do not write to the user's checkout. Committing is the caller'
 | Branch not found | Re-run without stderr suppression, report which failure it was |
 | Two branches match the key | Stop; one story maps to one branch |
 | A CLI is absent | Record it, continue with the rest |
-| `/simplify` breaks the tests | Discard its edits in the worktree, report, continue |
-| `ce-code-review` plugin absent | Sub-agent returns `unavailable`, named in the report |
+| The simplify pass breaks the tests | Discard its edits in the worktree, report, continue |
+| `code-review` returned only its launch line | Wait for `$SCRATCH/code-review.json`; if it never appears, record `failed`, never a clean result |
+| A sub-agent's `model` is refused | Re-dispatch with `sonnet`; never omit `model`, and never go above `opus` |
 | A sub-agent returns nothing | Treat as `failed`, name it, do not report a clean result |
 | No design doc | Check 5e SKIPPED, not a finding |
 | No test evidence | `EVIDENCE: none`, no clean `READY` |
-| `/tech-document` returns `BLOCKED` or nothing | Check 5f `failed`, named in the report; never a clean result |
+| The `tech-document` sub-agent returns `BLOCKED` or nothing | Check 5f `failed`, named in the report; never a clean result |
 
 ## Notes
 

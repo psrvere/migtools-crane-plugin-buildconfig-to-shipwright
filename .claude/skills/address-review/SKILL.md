@@ -49,8 +49,9 @@ The user invoked this with: $ARGUMENTS
   skill first; the footer is appended after, verbatim. If the `unslop` skill is not
   available, offer to install it; if the user declines, use the text as drafted and say
   so in the summary.
-- Sub-agents run on Sonnet except the challenger, which runs on Opus. Pass `model` on
-  every Agent call.
+- Every Agent call passes `model`, and the ceiling is `opus`: triage on Sonnet, the
+  challenger and the fix agents on Opus. An omitted model inherits the session's, which
+  may sit above Opus; that is a bug, not a default.
 - A skipped stage says so in the summary. Never let a skipped step look clean.
 - When the skill loads, the harness replaces a dollar sign followed by a digit with the matching argument, so no snippet in this file may use awk fields or shell positional parameters; use `grep`, `sed` and named variables instead.
 
@@ -259,12 +260,12 @@ only the changed rows. No point may still be `ask` when Stage 4 starts: if the g
 one undecided, ask about that one point in a single line ("skip" is a valid answer) and
 wait again. Otherwise proceed without a second go.
 
-## Stage 4: Fix, one Sonnet agent per file group
+## Stage 4: Fix, one Opus agent per file group
 
 Take every point with verdict `fix` or `fix-differently`. Group by the first entry of
 `files`; a point that names several files joins the group of its first file, and no two
 groups share a file (merge groups that overlap). For each group dispatch an Agent call,
-`subagent_type: general-purpose`, `model: "sonnet"`, prompt = body of
+`subagent_type: general-purpose`, `model: "opus"`, prompt = body of
 `$SKILL/agents/fix.md` + `Worktree: $WT` + the group's points (quote, plan, files,
 reviewer text) + `Write your JSON to: $SCRATCH/fix/<group index>.json`. Up to 4 in one
 message, then the next 4.

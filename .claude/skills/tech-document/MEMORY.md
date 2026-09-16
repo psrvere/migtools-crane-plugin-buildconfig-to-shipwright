@@ -27,3 +27,30 @@ Keys: `unmapped-doc:<path>`, `no-map-row:<class>:<name>`, `heading-drift:<doc>:<
   How it works` as pre-existing because the outcome-annotation map row did not name that
   doc. Promoted the same day: the row now names it.
 - Type: PROMOTED
+
+## Run: BUILD-2459-s2i-params (2026-09-03), apply
+- `no-map-row:TEST:support_matrix_test.go prose map` — deleting warning rows renumbers
+  every later `W<n>`, and `quotedWarnings` in `buildconfig/support_matrix_test.go`
+  hardcodes the one prose row by id (`prose := map[string]bool{"W33": true}`). The map's
+  warning row names the doc and the test but not that the test carries a row id, so a
+  renumber that misses it fails as "row W<n> quotes no warning and is not a known prose
+  row". Fix is the id in the test, not the doc.
+- Type: NOTED
+
+## Run: BUILD-2402-sa-template (2026-09-10), apply
+- `no-map-row:GATE:processResources` — the change to when the BuildRun template is written (the early return in `processResources`) hit no map row; grep alone implicated architecture rule 9 and the generated-resources table, ADR-0005, the matrix annotation table, README and AGENTS.md. A row for "the condition that writes an annotation changes" would name them.
+- Type: NOTED
+
+## Run: BUILD-2393-trigger-runbook (2026-09-10), apply
+- `unmapped-doc:docs/known-limitations.md` — landed with PR #84; its trigger rows are where the trigger runbook is linked from. Needs a doc-set row and a map row for the not-supported table.
+- `unmapped-doc:docs/trigger-migration.md` — new with BUILD-2393; guarded by `TestTriggerRunbookYAMLParses`. Needs a doc-set row and a map row keyed on the trigger warnings W50 to W56.
+- Type: NOTED
+
+## Run: BUILD-2402-sa-template (2026-09-10), apply
+- `no-map-row:WARNING:claim-echoed-in-prose` — the warnings map row points a reworded warning at its `W<n>` entry and the field row that cites it. It does not point at the prose that restates the warning's *claim* elsewhere. Rewording W67 mid-review left `README.md` (the BuildRun paragraph), `docs/architecture.md` step 5 and the `spec.serviceAccount` field row all still asserting the flat "which crane drops", which the new warning text no longer says. Every keeper test stayed green: nothing ties a warning's substance to prose that paraphrases it. A row for "a warning's claim is restated in prose" would name those three.
+- Type: NOTED
+
+## Run: BUILD-2479-skills-design-gaps (2026-09-16), report
+- `no-map-row:PATH:.claude/skills -> development.md` — the map row for `.claude/skills/**` points at the README skills table only, but the per-skill contract (arguments, what each skill needs and leaves behind) lives in `development.md`. A skill that gains an argument form (tech-test now takes a branch name) moves a development.md cell, and only grep found it. The row should name both.
+- `no-map-row:CLAIM:removed-file` — a skill or gotcha asserting that a file no longer exists (`tests/e2e-transform.sh`) implicates every doc that still names it: AGENTS.md › Testing, hack/README.md › Testing the Plugin, docs/architecture.md › The files. No map row keys on "a path the branch says is gone"; a grep for the path is the only catch.
+- Type: NOTED
