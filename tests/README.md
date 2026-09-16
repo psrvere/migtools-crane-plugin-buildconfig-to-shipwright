@@ -1,36 +1,30 @@
 # BuildConfig to Shipwright Plugin Tests
 
-Focused unit test suite for validating BuildConfig → Shipwright Build conversion.
+Offline conversion suite for the plugin. Every fixture under `testdata/` goes through
+`plugin.Run()` as a Go library call, and what comes back is compared with the golden files
+committed beside it. No crane binary, no cluster.
 
 ## Approach
 
-**Direct plugin execution + Golden file comparison** - No crane binary or cluster needed!
-
 ```
-BuildConfig YAML → Parse → plugin.Run() → Compare with Expected Output → ✅
+testdata/NN-<case>/buildconfig.yaml → plugin.Run() → compare with expected_<Kind>.yaml → ✅
 ```
-
-Tests call the plugin directly as a Go library and compare output against expected golden files.
 
 ## Quick Start
-
-**Note:** Tests are run manually/locally on demand (not in CI).
 
 ```bash
 cd tests
 
-# Run all tests
-go test ./e2e -v
+# Run every case
+GOWORK=off go test ./e2e -count=1
 
-# Run single test
-go test ./e2e -v -ginkgo.focus="webapp-docker"
-
-# Run only tests with golden files
-go test ./e2e -v -ginkgo.focus="docker|s2i|webapp"
+# Run one case, by its Entry label
+GOWORK=off go test ./e2e -v -ginkgo.focus="webapp-docker"
 ```
 
-**Speed:** ~0.012 seconds for 10 tests (with golden files)  
-**Requirements:** Go 1.22+ only (no crane, no cluster)
+`GOWORK=off` runs the suite the way CI does; a `go.work` outside this repo can resolve
+different dependency versions. **Requirements:** the Go version in `tests/go.mod`
+(`GOTOOLCHAIN=auto` fetches it). Nothing else.
 
 ## Structure
 
@@ -51,196 +45,71 @@ tests/
 │   │   └── expected_annotations.json   # instead of a golden: the outcome annotations of a passthrough
 │   ├── ...
 │   └── e2e-*/                      # cluster cases for e2e-cluster.sh, not read by this suite
+├── go.mod                  # its own module; `replace` points at the plugin one level up
 └── e2e-cluster.sh          # cluster-based integration tests
 ```
 
-## Test Coverage
+## How a case is checked
 
-### 25 test cases
+Each `testdata/NN-<slug>/` directory is one `Entry` in `e2e/conversion_test.go`. For it,
+the suite:
 
-**18 from real-world scenarios (issues #833-#850):**
-- Docker + S2I combinations
-- Environment variables and volumes
-- Pull secrets and proxies
-- Post-commit hooks
-- Service account overrides
-- No-cache builds
-- ImageSource cross-namespace
+1. Parses `buildconfig.yaml`, a multi-document file. Only documents whose kind is
+   `BuildConfig` reach the plugin; a Template or a List is left alone, its objects are not
+   unwrapped, and nothing is generated (cases 21 and 22). A file with several BuildConfigs
+   converts each one (case 03).
+2. Reads `flags.json` when it exists and passes its keys as crane `--optional-flags`, the
+   way `imagestream-mapping` and `registry-mapping` reach the plugin.
+3. Calls `plugin.Run()` and collects every resource it returns: `Build`, `ServiceAccount`,
+   `ConfigMap`.
+4. Compares each kind with `expected_<Kind>.yaml`:
+   - the file exists and has content: the generated resources of that kind, joined with
+     `---` when there are several, must equal it after YAML normalization. Both sides are
+     parsed and re-marshalled, so key order and formatting do not matter, and every value
+     does;
+   - the file is missing or empty: nothing of that kind may be generated.
+5. When `expected_annotations.json` exists, checks that the patch the plugin returns for
+   the first BuildConfig sets every listed annotation to the listed value. This is how a
+   passthrough (Custom strategy, no output image) is asserted: no golden, an outcome and a
+   reason.
 
-**2 from PR#60 cluster tests:**
-- Docker + ImageStream (Ruby)
-- S2I + ImageStream (Node.js)
+Every Entry runs; there is no skip outcome. A case that must produce no Build has no
+`expected_Build.yaml`, and the suite fails if one appears.
 
-### Validation Approach
+## Adding a case
 
-**Golden File Comparison:**
-- Tests with expected outputs in `expected_output/` compare complete YAML
-- Exact field-by-field comparison
-- 10 tests currently have golden files
+1. Create `testdata/NN-<slug>/` with the next free number and put the input in
+   `buildconfig.yaml`. Add `flags.json` when the case needs plugin flags.
+2. Generate the golden from the plugin, never by hand: drive the built plugin over the
+   fixture (the stdin drive in `/tech-test`) and save each emitted resource as
+   `expected_<Kind>.yaml`. A hand-written golden encodes what you expect; a generated one
+   encodes what the code does. For a passthrough, write `expected_annotations.json`
+   instead, holding the outcome annotations the plugin sets.
+3. Add the Entry to `e2e/conversion_test.go`:
 
-**Tests without golden files:**
-- Skipped (incomplete BuildConfigs or Templates)
-- Can be added later as needed
-
-### What's Validated
-
-When golden files exist, tests validate:
-
-1. **API Version** - Must be `shipwright.io/v1beta1`
-2. **Strategy Mapping**
-   - Docker → buildah
-   - Source → source-to-image
-   - JenkinsPipeline/Custom → skipped
-3. **Annotations**
-   - `crane.konveyor.io/converted-from`
-   - Conversion outcome tracking
-4. **Field Mappings**
-   - Git source (URI, ref, contextDir)
-   - Output image
-   - Dockerfile path
-   - Timeouts and retention
-5. **Labels Preservation**
-6. **Triggers** - Preserved in annotations
-7. **Environment Variables** - Preserved
-8. **Volumes** - Preserved
-
-## How Tests Work
-
-Each test specifies its expected outcome:
-
-1. **`"pass"`** - Expects Build generated and matching golden file
-   - Parses BuildConfig YAML from `testdata/buildconfig_yamls/`
-   - Calls `plugin.Run()` directly (no crane binary)
-   - Compares actual vs expected YAML (exact match)
-   - Fails if no Build generated or if it differs from golden file
-
-2. **`"empty"`** - Expects NO Build generated (correct plugin behavior)
-   - Used for JenkinsPipeline strategy (unsupported)
-   - Used for BuildConfigs missing required fields (e.g., spec.output.to)
-   - Asserts plugin correctly returns empty (not an error)
-   - Fails if Build IS generated
-
-3. **`"skip"`** - Skips test (incomplete test data)
-   - Used for Templates/Lists that need unwrapping
-   - Used for tests with known issues
-   - Does not fail the test suite
-
-**Test outcomes:**
-- ✅ **Pass** - Build matches expected (or correctly empty)
-- ❌ **Fail** - Build differs from expected (or unexpected outcome)
-- ⊘ **Skip** - Test explicitly skipped
-
-## Example Output
-
-```
-Running Suite: BuildConfig to Shipwright Conversion Suite
-==========================================================
-
-✓ [#835] docker-and-s2i [PASSED] [0.001s]
-✓ [#836] webapp-docker [PASSED] [0.001s]
-✓ [#837] api-s2i [PASSED] [0.001s]
-✓ [#838] jenkins-pipeline (skipped) [PASSED] [0.001s]
-✓ [PR#60] docker-imagestream-ruby [PASSED] [0.001s]
-✓ [PR#60] s2i-imagestream-nodejs [PASSED] [0.001s]
-...
-
-Ran 20 of 20 Specs in 0.012 seconds
-SUCCESS! -- 12 Passed | 8 Failed | 0 Pending | 0 Skipped
-```
-
-## Adding New Tests
-
-### 1. Add BuildConfig YAML
-
-```bash
-cp my-buildconfig.yaml testdata/21-my-test.yaml
-```
-
-### 2. Add Test Entry
-
-Edit `e2e/conversion_test.go`:
-
-```go
-Entry("[#851] my-test", "21-my-test.yaml", "851", "description"),
-```
-
-### 3. Run Test
-
-```bash
-go test ./e2e -v -ginkgo.focus="my-test"
-```
-
-## Extending Tests
-
-### Add New Golden File Test
-
-1. Create golden file: `tests/testdata/expected_output/21-my-test-expected.yaml`
-2. Add test entry:
    ```go
-   Entry("[#851] my-test", "21-my-test.yaml", "851", "description", "pass")
+   Entry("my-case", "NN-my-case", "what the case covers"),
    ```
 
-### Add Test Expecting Empty Result
+4. Run it: `GOWORK=off go test ./e2e -v -ginkgo.focus="my-case"`.
+5. Add the case to the list under Test Results below.
 
-For unsupported strategies or incomplete BuildConfigs:
-```go
-Entry("[#852] custom", "22-custom.yaml", "852", "Custom strategy", "empty")
-```
+Fixtures carry generic names only. The repository is public, so nothing that came from a
+customer lands here as it arrived.
 
-## CI Integration
+## CI
 
-E2E tests run automatically on every PR and push to main via GitHub Actions.
+`.github/workflows/go.yml` runs the suite on every pull request and on every push to
+`main`, as the "E2E plugin conversion tests" step after the unit tests. Nothing beyond Go
+is installed for it.
 
-**Workflow:** `.github/workflows/go.yml`
+## What is not tested here
 
-```yaml
-- name: E2E plugin conversion tests
-  env:
-    GOPROXY: "https://proxy.golang.org"
-  run: |
-    cd tests
-    go test ./e2e -v
-    echo "## E2E Test Results" >> "$GITHUB_STEP_SUMMARY"
-    echo "✅ Plugin conversion tests passed" >> "$GITHUB_STEP_SUMMARY"
-```
+- the crane workflow (`export`, `transform`, `apply`) and plugin loading
+- image builds and BuildRuns on a cluster
 
-**Runs on:**
-- All pull requests (gates merging)
-- Push to main branch (post-merge validation)
-
-**No dependencies needed in CI** - just Go!
-
-## Benefits
-
-✅ **Fast** - 0.011s for all 20 tests  
-✅ **Simple** - No crane binary, no cluster, no rule engine  
-✅ **Focused** - Tests plugin logic, not crane workflow  
-✅ **Maintainable** - Golden file comparison only (~270 LOC framework)  
-✅ **Explicit** - Each test declares expected outcome (pass/empty/skip)  
-✅ **Comprehensive** - 20 test cases covering all scenarios  
-
-## What's NOT Tested
-
-This framework focuses on **plugin conversion correctness**. It does NOT test:
-
-- ❌ crane CLI workflow (export/transform/apply)
-- ❌ Plugin loading mechanism  
-- ❌ Actual image builds on cluster
-- ❌ BuildRun execution
-
-**For integration testing:** Use crane's E2E tests or the bash scripts in this repo (`e2e-cluster.sh`, `e2e-transform.sh`).
-
-## Relationship to PR#60
-
-PR#60 added cluster-based integration tests (Bash scripts). This framework:
-- **Complements** those tests (unit vs integration)
-- **Includes** their test cases (#19, #20) as unit tests
-- **Validates** conversion logic they depend on
-- **Runs faster** for development iteration
-
-Both are valuable:
-- **Unit tests (this):** Fast feedback on conversion logic
-- **Cluster tests (PR#60):** Full workflow validation
+`e2e-cluster.sh` covers those on Minikube. `.github/workflows/test-e2e-minikube-pr.yml`
+runs it on every pull request, and `../hack/README.md` explains the setup.
 
 ## Test Results
 
@@ -248,7 +117,7 @@ Every directory under `tests/testdata/NN-*` is one Entry, and every Entry runs; 
 skipped. 25 cases as of this file, in three groups by what the directory holds.
 
 **Golden comparison (20 cases).** The generated resources must match the
-`expected_<Kind>.yaml` files byte for byte:
+`expected_<Kind>.yaml` files after YAML normalization:
 
 - ✅ 01-datagrid-hotrod — S2I with triggers
 - ✅ 02-cakephp-mysql — S2I with postCommit
@@ -284,28 +153,14 @@ suite expects nothing to be generated:
 - ✅ 21-template-negative — Template ignored (negative test)
 - ✅ 22-list-negative — List ignored (negative test)
 
-Regenerate a golden from the plugin, never by hand: drive the built plugin over the
-`buildconfig.yaml` (see `/tech-test`, the stdin drive) and save what it emitted as
-`expected_<Kind>.yaml`.
-
 ## Troubleshooting
 
-### Tests Fail
-
-1. Check error message for which rule failed
-2. Compare expected vs actual values
-3. Fix plugin code or update rule definition
-
-### Rule Definition Issues
-
-- Verify YAML syntax in `rules.yaml`
-- Check field paths use dot notation correctly
-- Ensure rule type exists in `rule_evaluator.go`
-
-### Plugin Build Issues
-
-```bash
-# Ensure plugin builds
-cd ..
-go build .
-```
+- **`<Kind> mismatch (see expected_<Kind>.yaml)`**, followed by `Line N` with `Expected`
+  and `Actual`: the plugin's output moved. Decide whether the code or the golden is wrong;
+  when the code is right, regenerate the golden from the plugin.
+- **`Unexpected <Kind> generated`**: the plugin now emits a kind the case has no golden
+  for. Add `expected_<Kind>.yaml` if that is intended.
+- **`Expected <Kind> (from expected_<Kind>.yaml), but none generated`**: the conversion
+  now fails or skips this input. Read the outcome annotations with the stdin drive.
+- **Build errors under `tests/`**: this is its own module. Run `go build ./...` here, and
+  `go mod tidy` when a plugin package it imports has moved.
