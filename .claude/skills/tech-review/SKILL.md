@@ -193,6 +193,10 @@ done
 
 Record both results. They go in the compliance report whether present or not.
 
+`qodo` also needs `agent.toml` — the command definition the reviewer runs, untracked in
+the checkout. Probe for it next to the checkout root and record it the same way; without
+it the qodo reviewer reports `unavailable` rather than falling back to a free-form prompt.
+
 Do not probe for skills this way. `/code-review`, `/simplify` and `ce-code-review` are
 not files on disk, and inspecting a plugin cache path would hardcode a home directory,
 depend on Claude Code internals, and still not reveal whether a plugin is *enabled*.
@@ -324,7 +328,7 @@ are dispatched as sub-agents.** (`/simplify`, also Skill-backed, is already orch
 | Reviewer | How to run | Prompt / instructions | When |
 |---|---|---|---|
 | `cli-review` (coderabbit) | **sub-agent** | `reviewers/cli-review.md` | `coderabbit` on PATH and not excluded by `--cli` |
-| `cli-review` (qodo) | **sub-agent** | `reviewers/cli-review.md` | `qodo` on PATH and not excluded by `--cli` |
+| `cli-review` (qodo) | **sub-agent** | `reviewers/cli-review.md` | `qodo` on PATH, `agent.toml` present, and not excluded by `--cli` |
 | `code-review` | **orchestrator-level** (invoke `/code-review` yourself) | `reviewers/code-review.md` | Always |
 | `ce-code-review` | **orchestrator-level** (invoke the Skill yourself) | `reviewers/ce-code-review.md` | Escalation threshold met — see below |
 | `tech-document` | **orchestrator-level** (invoke `/tech-document "$BRANCH" --report --work "$WT"` yourself) | its own `--report` contract | Always |

@@ -60,7 +60,7 @@ says so, rather than failing.
 | `/code-review` | Built into Claude Code | yes | `/tech-review` |
 | `/simplify` | Built into Claude Code | yes | `/tech-review` |
 | `coderabbit` | External CLI | no | `/tech-review` |
-| `qodo` | External CLI, `@qodo/command` | no | `/tech-review` |
+| `qodo` | External CLI, `@qodo/command`, plus an untracked `agent.toml` in the checkout | no | `/tech-review` |
 | `compound-engineering` | Claude Code plugin | no | `/tech-review` escalation |
 
 Tool availability is **not** stored in `repo.md`. Paths are stable for the life of a

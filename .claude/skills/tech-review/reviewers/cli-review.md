@@ -34,9 +34,8 @@ no change anywhere else.
 2. Run it against the merge base.
 
    `$REPO` here is the review worktree the orchestrator created, not the user's checkout.
-   `coderabbit` is read-only and runs against it directly; `qodo` is writable, so it runs
-   against a private throwaway copy instead (see below). Either way no write reaches the
-   user's checkout.
+   Both tools run against it directly and both run read-only, so no write reaches the
+   worktree the other reviewers are reading, and none reaches the user's checkout.
 
    **coderabbit:**
 
@@ -48,33 +47,55 @@ no change anywhere else.
    gives scriptable output. `-c AGENTS.md` feeds it the repo's own conventions, so its
    findings account for local invariants instead of reporting workspace noise.
 
-   **qodo:** `qodo` defaults to a writable, auto-approving session (`-q -y`), and Stage 3
-   runs the reviewers in parallel against the one shared `$REPO`. So `qodo` must not run in
-   that shared tree: a write while another reviewer is reading corrupts it, and Stage 7's
-   patch (`git -C "$WT" diff "$BASE"`) would sweep up whatever `qodo` left behind. Give it
-   its own private copy and throw it away after:
+   **qodo:** run the repo's own `tech_review` command, read-only, in the shared worktree:
 
    ```bash
-   QREPO="$(mktemp -d)/qodo-review"
-   cp -a "$REPO" "$QREPO"    # a copy, not a git worktree — /simplify's edits are uncommitted
-   qodo "Review the working tree in this directory against the merge base $MERGE_BASE
-   (git diff --no-ext-diff $MERGE_BASE), including uncommitted changes. Focus on
-   correctness and edge cases. Report file and line for each issue." --dir "$QREPO" -q -y
-   rm -rf "$QREPO"
+   # The agent config is untracked in the user's checkout, so a linked worktree does not
+   # carry it. Look in the worktree first, then in the checkout the worktree came from.
+   AGENT_FILE="$REPO/agent.toml"
+   if [ ! -f "$AGENT_FILE" ]; then
+     COMMON="$(git -C "$REPO" rev-parse --git-common-dir)"
+     case "$COMMON" in /*) ;; *) COMMON="$REPO/$COMMON" ;; esac
+     AGENT_FILE="$(cd "$(dirname "$COMMON")" && pwd)/agent.toml"
+   fi
+
+   qodo tech_review --agent-file "$AGENT_FILE" --set base="$MERGE_BASE" \
+     --dir "$REPO" --permissions=r -q -y --ci > "$SCRATCH/qodo.raw"
+   sed -n '/^{/,$p' "$SCRATCH/qodo.raw" > "$SCRATCH/qodo.json"
    ```
 
-   `cp -a`, not `git worktree add`: a worktree checks out a commit and would miss
-   `/simplify`'s uncommitted edits, reintroducing the very gap Stage 2 exists to close. The
-   copy carries those edits and contains any write `qodo` makes.
+   `-q` prints the result and nothing else, but the result still arrives behind a
+   screen-clear escape sequence, so `sed` from the first line that starts with `{` is
+   what turns it into parseable JSON. Read `$SCRATCH/qodo.json`, check it parses and
+   that `status` and `source` are set, and only then treat it as your output. If it does
+   not parse, re-run without `-q` and read the error: `-q` suppresses failures too, so a
+   silent empty file is a failed run, never a clean one.
 
-   Diff against `$MERGE_BASE`, not `$MERGE_BASE..HEAD`. `/simplify` ran first and its edits
-   are uncommitted (HEAD is still the branch tip), so a `..HEAD` range would miss them.
-   `coderabbit` reads the shared tree directly via `--cwd "$REPO"`; it is read-only, so it
-   needs no copy. If your `qodo` build supports a read-only agent file or a `--permissions=r`
-   flag, pass it too as defence in depth — but the private copy is what actually protects the
-   shared tree and the Stage 7 patch.
+   Three things that command buys over the free-form prompt it replaces.
 
-   Give either tool a generous timeout. If it exceeds it, kill it and report
+   `--permissions=r` is what makes qodo safe in the shared tree. It used to run writable
+   and auto-approving (`-q -y`), so it got its own `cp -a` copy and the copy was thrown
+   away after. The copy is gone: read-only is the guarantee, and `--dir "$REPO"` scopes it
+   to the worktree on top of that.
+
+   `agent.toml` pins the review. It carries the diff target, the repo's own rules
+   (AGENTS.md, the architecture page, the support matrix), the do-not-report list, and an
+   `output_schema` that is this skill's findings schema. So qodo returns JSON in the right
+   shape instead of prose you re-read into findings, and two runs are comparable. If the
+   file is missing — a fresh clone, since it is untracked — report `status: unavailable`
+   with `reason: agent.toml not found at <path>` rather than falling back to a prompt. A
+   free-form run is a different review and must not be reported under the same name.
+
+   `--set base=` gives it the merge base, not a range. `/simplify` ran first and its edits
+   are uncommitted (HEAD is still the branch tip), so a `$MERGE_BASE..HEAD` range would
+   miss them. The command's instructions say the same thing and also tell it to pick up
+   untracked files.
+
+   `coderabbit` reads the same worktree via `--cwd "$REPO"`.
+
+   Give either tool a generous timeout — 600000 ms, the Bash tool's maximum. `qodo` plans
+   before it acts and reads files over MCP, so minutes is normal and the 2-minute default
+   would kill a healthy run. If it does exceed the timeout, kill it and report
    `status: failed` with `reason: timed out after Ns` — never a clean empty result.
 
 3. Read the output and map each issue to one finding. Discard anything that is:
@@ -86,10 +107,13 @@ no change anywhere else.
    empty changed-file set while the review diff is non-empty, it did not actually review
    this branch — report `status: failed` (or degraded) with that reason, not `status: ok`
    with an empty array. An empty-but-clean result is only valid when the tool confirms it
-   examined the changed files and found nothing. (Observed with `qodo` this session: it ran
-   on its private copy, reported "no code changes detected vs merge base", and returned a
-   clean empty result that was really a miss — the uncommitted `/simplify` edits in the
-   copied tree were not on any commit, so its diff saw nothing.)
+   examined the changed files and found nothing. (Observed with `qodo` before the
+   `tech_review` command existed: it ran on its own private copy, reported "no code
+   changes detected vs merge base", and returned a clean empty result that was really a
+   miss — the uncommitted `/simplify` edits in the copied tree were not on any commit, so
+   its diff saw nothing. The command's instructions now spell out that the diff spans
+   committed and uncommitted work; keep this guard anyway, it is the last line of
+   defence.)
 
 4. Set `confidence` from how well the tool evidenced its claim. A finding citing a
    specific line and explaining a consequence is 8 or 9. A generic warning with no
@@ -106,7 +130,8 @@ Write to `$SCRATCH/<tool>.json` and return a one-line count.
 ## Constraints
 
 - Never pass `--fix`, `--apply`, or any flag that writes. Both tools have one; neither is
-  yours to use.
+  yours to use. For `qodo` that also means never `--permissions=rw` or `rwx`: `r` is the
+  reason it is allowed in the shared worktree at all.
 - Never authenticate, log in, or prompt. If the tool needs credentials it does not have,
   that is `status: unavailable` with the reason.
 - Never report `status: ok` with an empty array when the tool failed, timed out, or
