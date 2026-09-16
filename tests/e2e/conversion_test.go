@@ -77,7 +77,6 @@ var _ = Describe("BuildConfig to Shipwright Conversion", func() {
 		// Unsupported BuildConfigs - expected output: empty (rejected with annotations)
 		Entry("jenkins-pipeline", "06-jenkins-pipeline", "JenkinsPipeline rejected"),
 		Entry("custom-strategy", "07-custom-strategy", "Custom strategy rejected"),
-		Entry("s2i-with-volumes", "11-s2i-with-volumes", "Binary archive rejected"),
 		Entry("pullsecret-nodejs", "12-pullsecret-nodejs", "Missing output rejected"),
 
 		// Successful conversions - expected output: Build resources
@@ -98,5 +97,8 @@ var _ = Describe("BuildConfig to Shipwright Conversion", func() {
 		Entry("docker-imagestream-ruby", "19-docker-imagestream-ruby", "Docker with ImageStream"),
 		Entry("s2i-imagestream-nodejs", "20-s2i-imagestream-nodejs", "S2I with ImageStream"),
 		Entry("imagechange-trigger", "23-imagechange-trigger", "S2I with ImageChange trigger"),
+		Entry("s2i-with-volumes", "11-s2i-with-volumes", "S2I with binary directory source and volumes"),
+		Entry("binary-docker-certs", "24-binary-docker-certs", "Docker with binary directory source, source configMaps and secrets"),
+		Entry("binary-asfile", "25-binary-asfile", "Docker with a single-file binary source (asFile)"),
 	)
 })

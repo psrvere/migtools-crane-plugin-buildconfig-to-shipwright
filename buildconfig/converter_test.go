@@ -1097,19 +1097,31 @@ func TestConvertBinarySource(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	b := &shipwrightv1beta1.Build{}
-	jsonBytes, _ := json.Marshal(resp.NewResources[0].Object)
-	json.Unmarshal(jsonBytes, b)
+	b := decodeBuild(t, resp)
 
-	if b.Spec.Source.Type != shipwrightv1beta1.LocalType {
-		t.Errorf("expected Local source type, got %s", b.Spec.Source.Type)
+	if b.Spec.Source == nil || b.Spec.Source.Type != shipwrightv1beta1.LocalType {
+		t.Fatalf("expected Local source, got %+v", b.Spec.Source)
 	}
 	if b.Spec.Source.Local == nil || b.Spec.Source.Local.Name != "local-copy" {
 		t.Error("expected Local source with name local-copy")
 	}
+	if b.Spec.Source.Local == nil || b.Spec.Source.Local.Timeout == nil || b.Spec.Source.Local.Timeout.Duration != Timeout {
+		t.Errorf("expected Local source timeout %v, got %+v", Timeout, b.Spec.Source.Local)
+	}
+	// OpenShift placed the streamed file at asFile; a Local source takes a
+	// directory, so the user has to put the file there under that name and
+	// start the build with shp build upload.
+	assertContainsAll(t, b.Annotations[ConversionWarningsAnnotation],
+		`asFile "app.jar"`, `as "app.jar"`, "shp build upload binary-app <directory>",
+		fmt.Sprintf("waits %s", Timeout))
 }
 
-func TestConvertBinaryArchiveSourceRejected(t *testing.T) {
+// TestConvertBinaryDirectorySource covers the common binary BuildConfig, with
+// no asFile: on OpenShift it was started with oc start-build --from-dir (or
+// --from-archive), which streamed a directory into the build context. That is
+// what a Shipwright Local source fed by shp build upload does, so it converts
+// to a Local source; the warning tells the user how to start the build.
+func TestConvertBinaryDirectorySource(t *testing.T) {
 	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
 	request := transform.PluginRequest{
 		Unstructured: unstructured.Unstructured{Object: map[string]interface{}{
@@ -1143,14 +1155,54 @@ func TestConvertBinaryArchiveSourceRejected(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// A binary archive without asFile cannot be represented as a Shipwright
-	// source, so the conversion fails and the BuildConfig is passed through
-	// unchanged rather than shipping a Build with no usable source (BUILD-2318).
-	if resp.IsWhiteOut {
-		t.Error("expected passthrough (IsWhiteOut=false) for unsupported binary archive")
+	if !resp.IsWhiteOut {
+		t.Error("expected the BuildConfig to be replaced (IsWhiteOut=true)")
 	}
-	if len(resp.NewResources) != 0 {
-		t.Errorf("expected no converted resources for unsupported binary archive, got %d", len(resp.NewResources))
+	if len(resp.NewResources) != 1 {
+		t.Fatalf("expected one converted resource, got %d", len(resp.NewResources))
+	}
+	b := decodeBuild(t, resp)
+
+	if b.Spec.Source == nil || b.Spec.Source.Type != shipwrightv1beta1.LocalType {
+		t.Fatalf("expected Local source, got %+v", b.Spec.Source)
+	}
+	if b.Spec.Source.Local == nil || b.Spec.Source.Local.Name != "local-copy" {
+		t.Error("expected Local source with name local-copy")
+	}
+	if b.Spec.Source.Local == nil || b.Spec.Source.Local.Timeout == nil || b.Spec.Source.Local.Timeout.Duration != Timeout {
+		t.Errorf("expected Local source timeout %v, got %+v", Timeout, b.Spec.Source.Local)
+	}
+	ann := b.Annotations[ConversionWarningsAnnotation]
+	assertContainsAll(t, ann, "no asFile", "--from-dir", "shp build upload binary-archive-app <directory>",
+		fmt.Sprintf("waits %s", Timeout))
+	if strings.Contains(ann, "asFile \"") {
+		t.Errorf("directory form must not mention an asFile name, got %q", ann)
+	}
+	if got := b.Annotations[ConversionOutcomeAnnotation]; got != string(OutcomeConvertedWithWarnings) {
+		t.Errorf("outcome = %q, want %q", got, OutcomeConvertedWithWarnings)
+	}
+}
+
+// TestConvertBinarySourceKeepsContextDir: contextDir was relative to the
+// uploaded input on OpenShift and is relative to the uploaded directory on a
+// Local source, so it carries over unchanged for a binary BuildConfig.
+func TestConvertBinarySourceKeepsContextDir(t *testing.T) {
+	plugin := &BuildConfigTransformPlugin{Log: logrus.New()}
+	resp, err := plugin.Run(buildConfigRequest("binary-ctx",
+		withSpecField("source", map[string]interface{}{
+			"type":       "Binary",
+			"binary":     map[string]interface{}{},
+			"contextDir": "sub",
+		})))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	b := decodeBuild(t, resp)
+	if b.Spec.Source == nil || b.Spec.Source.Type != shipwrightv1beta1.LocalType {
+		t.Fatalf("expected Local source, got %+v", b.Spec.Source)
+	}
+	if b.Spec.Source.ContextDir == nil || *b.Spec.Source.ContextDir != "sub" {
+		t.Errorf("expected contextDir sub on the Local source, got %+v", b.Spec.Source.ContextDir)
 	}
 }
 
@@ -1469,12 +1521,12 @@ func TestConvertInsecureRegistriesRouting(t *testing.T) {
 		wantParamVals []string
 	}{
 		{
-			name:         "docker gets registries-insecure param",
-			strategyType: "Docker",
-			outputImage:  "reg.local:80/org/app:latest",
-			extras:       map[string]string{"insecure-registries": "reg.local:80"},
-			wantInsecure: nil,
-			wantParam:    true,
+			name:          "docker gets registries-insecure param",
+			strategyType:  "Docker",
+			outputImage:   "reg.local:80/org/app:latest",
+			extras:        map[string]string{"insecure-registries": "reg.local:80"},
+			wantInsecure:  nil,
+			wantParam:     true,
 			wantParamVals: []string{"reg.local:80"},
 		},
 		{

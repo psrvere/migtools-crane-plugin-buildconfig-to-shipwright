@@ -1,4 +1,0 @@
-{
-  "buildconfig-to-shipwright/conversion-outcome": "failed",
-  "buildconfig-to-shipwright/conversion-reason": "binary archive source (extracted archive) is not supported in Shipwright, only single-file binary sources (asFile) (BuildConfig mys2itest)"
-}

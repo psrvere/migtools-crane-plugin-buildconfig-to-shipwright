@@ -1,0 +1,50 @@
+# The shape seen in client BuildConfigs: a Docker strategy with a Binary
+# source and no asFile (started with 'oc start-build --from-dir'), two
+# source.configMaps (CA bundles) and one source.secrets (registry
+# credentials) copied into the build context, dockerStrategy.env read by RUN
+# steps in the Dockerfile, and dockerStrategy.from and output.to both on a
+# private registry. Every name and URL is a placeholder.
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: binary-app
+  namespace: binary-test
+  labels:
+    app: binary-app
+spec:
+  failedBuildsHistoryLimit: 2
+  successfulBuildsHistoryLimit: 2
+  runPolicy: Serial
+  nodeSelector: null
+  resources: {}
+  postCommit: {}
+  output:
+    to:
+      kind: DockerImage
+      name: registry.example.internal/binary-app:1.2.2
+  source:
+    type: Binary
+    binary: {}
+    configMaps:
+      - configMap:
+          name: cluster-ca-certs
+        destinationDir: certs
+      - configMap:
+          name: app-certs
+        destinationDir: dir-app-certs
+    secrets:
+      - secret:
+          name: nexus
+        destinationDir: nexusSecret
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      from:
+        kind: DockerImage
+        name: registry.example.internal/base-images/java/openjdk-21:latest
+      env:
+        - name: artifact_url
+          value: https://nexus.example.internal/repository/deploy/app.jar
+        - name: artifact_name
+          value: app.jar

@@ -54,3 +54,15 @@ Keys: `unmapped-doc:<path>`, `no-map-row:<class>:<name>`, `heading-drift:<doc>:<
 - `no-map-row:PATH:.claude/skills -> development.md` — the map row for `.claude/skills/**` points at the README skills table only, but the per-skill contract (arguments, what each skill needs and leaves behind) lives in `development.md`. A skill that gains an argument form (tech-test now takes a branch name) moves a development.md cell, and only grep found it. The row should name both.
 - `no-map-row:CLAIM:removed-file` — a skill or gotcha asserting that a file no longer exists (`tests/e2e-transform.sh`) implicates every doc that still names it: AGENTS.md › Testing, hack/README.md › Testing the Plugin, docs/architecture.md › The files. No map row keys on "a path the branch says is gone"; a grep for the path is the only catch.
 - Type: NOTED
+
+## Run: BUILD-2475 (2026-09-16), report
+- `unmapped-doc:docs/known-limitations.md` — holds the README's former Known limitations content and is what this branch edited; the doc-set table does not list it. Load-bearing; promote soon.
+- `unmapped-doc:development.md` — first occurrence.
+- `unmapped-doc:docs/trigger-migration.md` — first occurrence.
+- `unmapped-doc:tests/README.md` — first occurrence; it still described case 11 as an empty result.
+- `heading-drift:README.md:Known limitations` — heading gone after the README rewrite; content moved to docs/known-limitations.md.
+- `heading-drift:README.md:Strategy support` — heading gone.
+- `heading-drift:README.md:Conversion example` — heading gone.
+- `heading-drift:README.md:Testing` — folded into "Working on the plugin".
+- `no-map-row:doc-inconsistency:examples-count` — README.md counts the worked examples twice, in the Worked examples prose and in the Documentation table, and the branch that added a fourth example updated only the prose. No map row ties the two to `docs/examples/README.md`; the second tech-document pass on this branch caught it by reading.
+- Type: NOTED (an `--audit` run would refresh the map in one pass)

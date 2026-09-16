@@ -207,7 +207,7 @@ oc adm policy add-scc-to-user pipelines-scc -z <generated-sa> -n <namespace>
 
 ## Worked examples
 
-[docs/examples](docs/examples/README.md) holds three BuildConfigs taken through the plugin,
+[docs/examples](docs/examples/README.md) holds four BuildConfigs taken through the plugin,
 with the exact input, the flags, the output, every warning, and the steps on the target
 cluster. A test regenerates their output on every CI run, so they cannot drift.
 
@@ -251,7 +251,7 @@ to the target registry. The plugin warns either way.
 |---|---|
 | [docs/support-matrix.md](docs/support-matrix.md) | every BuildConfig field: what happens, where it lands, what to do by hand, the warning |
 | [docs/known-limitations.md](docs/known-limitations.md) | what does not migrate, what to do instead, and what is planned |
-| [docs/examples](docs/examples/README.md) | three worked examples, verified on a cluster |
+| [docs/examples](docs/examples/README.md) | four worked examples, verified on a cluster |
 | [docs/volume-migration.md](docs/volume-migration.md) | why a Build with volumes fails with `UndefinedVolume`, and the strategy-copy fix |
 | [docs/trigger-migration.md](docs/trigger-migration.md) | getting builds to fire again: a listener for webhooks, a Pipeline and a CronJob for ImageChange, the first BuildRun for ConfigChange |
 | [docs/architecture.md](docs/architecture.md) | for maintainers and agents: how the plugin runs, the conversion steps, the rules that must stay true |

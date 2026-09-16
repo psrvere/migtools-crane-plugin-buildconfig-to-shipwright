@@ -36,29 +36,27 @@ go test ./e2e -v -ginkgo.focus="docker|s2i|webapp"
 
 ```
 tests/
-├── framework/              # ~270 LOC
-│   ├── plugin.go           # Direct plugin execution (~94 LOC)
-│   └── validation.go       # Golden file comparison (~176 LOC)
-├── e2e/                    # ~100 LOC  
+├── framework/
+│   ├── plugin.go           # runs plugin.Run() directly on a parsed BuildConfig
+│   └── validation.go       # compares generated resources with the golden files
+├── e2e/
 │   ├── e2e_suite_test.go   # Ginkgo setup
-│   └── conversion_test.go  # DescribeTable with 20 test cases
+│   └── conversion_test.go  # DescribeTable, one Entry per testdata directory (25 today)
 ├── testdata/
-│   ├── buildconfig_yamls/  # 20 BuildConfig test inputs
-│   │   ├── 01-datagrid-hotrod.yaml
-│   │   ├── ...
-│   │   ├── 19-docker-imagestream-ruby.yaml   # From PR#60
-│   │   └── 20-s2i-imagestream-nodejs.yaml    # From PR#60
-│   └── expected_output/    # 9 expected Build outputs (golden files)
-│       ├── 04-webapp-docker-expected.yaml
-│       ├── 05-api-s2i-expected.yaml
-│       └── ...
-├── e2e-cluster.sh          # Cluster-based integration tests (from PR#60)
-└── e2e-transform.sh        # Transform validation (from PR#60)
+│   ├── 01-datagrid-hotrod/         # one directory per case
+│   │   ├── buildconfig.yaml        # the input
+│   │   ├── flags.json              # optional: crane --optional-flags for this case
+│   │   └── expected_Build.yaml     # golden, one expected_<Kind>.yaml per generated resource
+│   ├── 06-jenkins-pipeline/
+│   │   └── expected_annotations.json   # instead of a golden: the outcome annotations of a passthrough
+│   ├── ...
+│   └── e2e-*/                      # cluster cases for e2e-cluster.sh, not read by this suite
+└── e2e-cluster.sh          # cluster-based integration tests
 ```
 
 ## Test Coverage
 
-### 20 Test Cases
+### 25 test cases
 
 **18 from real-world scenarios (issues #833-#850):**
 - Docker + S2I combinations
@@ -246,37 +244,49 @@ Both are valuable:
 
 ## Test Results
 
-**Summary:** 12 Passed | 0 Failed | 8 Skipped (20 total)
+Every directory under `tests/testdata/NN-*` is one Entry, and every Entry runs; nothing is
+skipped. 25 cases as of this file, in three groups by what the directory holds.
 
-### Passing Tests (12/20)
+**Golden comparison (20 cases).** The generated resources must match the
+`expected_<Kind>.yaml` files byte for byte:
 
-**Correct conversions (9 tests):**
-- ✅ webapp-docker
-- ✅ api-s2i
-- ✅ docker-with-envvars
-- ✅ s2i-with-envvars
-- ✅ docker-with-volumes
-- ✅ docker-nocache
-- ✅ serviceaccount-override
-- ✅ docker-imagestream-ruby (from PR#60)
-- ✅ s2i-imagestream-nodejs (from PR#60)
+- ✅ 01-datagrid-hotrod — S2I with triggers
+- ✅ 02-cakephp-mysql — S2I with postCommit
+- ✅ 03-docker-and-s2i — Multi-BuildConfig (2 Builds)
+- ✅ 04-webapp-docker — Docker strategy
+- ✅ 05-api-s2i — S2I strategy
+- ✅ 08-docker-with-envvars — Docker with envvars
+- ✅ 09-s2i-with-envvars — S2I with envvars
+- ✅ 10-docker-with-volumes — Docker with volumes
+- ✅ 13-generic-test-build — S2I with Generic trigger
+- ✅ 14-docker-postcommit — Docker with postCommit
+- ✅ 15-build-with-proxy — S2I with proxy
+- ✅ 16-imagesource-cross-namespace — Docker with cross-namespace ImageStream
+- ✅ 17-docker-nocache — Docker nocache
+- ✅ 18-serviceaccount-override — ServiceAccount override
+- ✅ 19-docker-imagestream-ruby — Docker with ImageStream
+- ✅ 20-s2i-imagestream-nodejs — S2I with ImageStream
+- ✅ 23-imagechange-trigger — S2I with ImageChange trigger
+- ✅ 11-s2i-with-volumes — S2I with binary directory source and volumes
+- ✅ 24-binary-docker-certs — Docker with binary directory source, source configMaps and secrets
+- ✅ 25-binary-asfile — Docker with a single-file binary source (asFile)
 
-**Correct empty results (3 tests):**
-- ✅ jenkins-pipeline (JenkinsPipeline strategy - unsupported)
-- ✅ s2i-with-volumes (missing spec.output.to)
-- ✅ pullsecret-nodejs (missing spec.output.to)
+**Passthrough with outcome annotations (3 cases).** No Build is generated; the
+BuildConfig comes back with the annotations in `expected_annotations.json`:
 
-### Skipped Tests (8/20)
+- ✅ 06-jenkins-pipeline — JenkinsPipeline rejected
+- ✅ 07-custom-strategy — Custom strategy rejected
+- ✅ 12-pullsecret-nodejs — Missing output rejected
 
-Templates/Lists that need unwrapping:
-- ⊘ datagrid-hotrod (Template wrapper)
-- ⊘ cakephp-mysql (List wrapper)
-- ⊘ docker-and-s2i (Multi-BuildConfig file)
-- ⊘ custom-strategy (List wrapper)
-- ⊘ generic-test-build (List wrapper)
-- ⊘ docker-postcommit (List wrapper)
-- ⊘ build-with-proxy (List wrapper)
-- ⊘ imagesource-cross-namespace (List wrapper)
+**No BuildConfig extracted (2 cases).** The input is a Template or a List, and the
+suite expects nothing to be generated:
+
+- ✅ 21-template-negative — Template ignored (negative test)
+- ✅ 22-list-negative — List ignored (negative test)
+
+Regenerate a golden from the plugin, never by hand: drive the built plugin over the
+`buildconfig.yaml` (see `/tech-test`, the stdin drive) and save what it emitted as
+`expected_<Kind>.yaml`.
 
 ## Troubleshooting
 
