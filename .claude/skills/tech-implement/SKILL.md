@@ -241,6 +241,44 @@ verification.
 
 **`documentation` / `spike`** — no automated tests; manual review of the output.
 
+**Every class that changes what the converter emits or accepts** also adds or changes an e2e
+golden, the one the design doc's Testing Plan names: a directory `tests/testdata/NN-<slug>/`
+holding the input `buildconfig.yaml` and either `expected_<Kind>.yaml` per generated
+resource or `expected_annotations.json` for a passthrough, plus an `Entry` in
+`tests/e2e/conversion_test.go`, and a `flags.json` when the case needs plugin flags (the
+suite passes it as the request's `extras`). Generate the expected files from the plugin,
+never by hand. The binary reads one `PluginRequest` on stdin and writes one
+`PluginResponse` envelope, so the goldens are cut out of that envelope, one file per kind:
+
+```bash
+GOWORK=off go build -o "$SCRATCH/crane-plugin" .
+F=tests/testdata/NN-<slug>
+yq -o=json "$F/buildconfig.yaml" \
+  | jq --slurpfile x "$F/flags.json" '. + {extras: $x[0]}' \
+  | "$SCRATCH/crane-plugin" > "$SCRATCH/resp.json"          # drop the jq step when there is no flags.json
+for k in Build ServiceAccount ConfigMap; do
+  jq -e --arg k "$k" '[.newResources[]? | select(.kind == $k)] | length > 0' "$SCRATCH/resp.json" >/dev/null \
+    && jq -r --arg k "$k" '.newResources[] | select(.kind == $k)' "$SCRATCH/resp.json" | yq -P '.' > "$F/expected_$k.yaml"
+done
+# A passthrough has no newResources; its golden is the annotation map the patch adds:
+jq -e '.patches' "$SCRATCH/resp.json" >/dev/null \
+  && jq '[.patches[] | select(.path == "/metadata/annotations") | .value] | add' "$SCRATCH/resp.json" > "$F/expected_annotations.json"
+```
+
+A multi-document fixture is driven one document at a time and the outputs of one kind are
+joined with `---`. Read every generated file before committing it: a hand-written golden
+encodes what you expect; a generated one encodes what the code does, which is what the
+reviewer needs to see, and a wrong value in it is a bug to fix in the code, not in the
+file. Run the suite afterwards:
+
+```bash
+(cd tests && GOWORK=off go test ./e2e -count=1)
+```
+
+The subshell matters: the Bash tool's working directory persists between calls, and a bare
+`cd tests` leaves every later command in the tests module, where `go test ./...` never
+reaches `buildconfig`.
+
 Run tests with `GOWORK=off`. The workspace `go.work` resolves dependencies across modules,
 while CI builds each repo standalone:
 
@@ -316,8 +354,10 @@ and it will only surface as a suite failure later.
 
 1. **Strategy Catalog Repo first**, if the issue changes a ClusterBuildStrategy.
 2. **Crane Plugin Repo second** — the conversion logic in `buildconfig/`.
-3. **Unit tests third.**
-4. **Run them**: `GOWORK=off go test ./... -count=1`.
+3. **Unit tests third, and the e2e golden with them**: the fixture directory, its expected
+   files generated from the plugin, and the `Entry` in `tests/e2e/conversion_test.go`.
+4. **Run them**: `GOWORK=off go test ./... -count=1`, then
+   `(cd tests && GOWORK=off go test ./e2e -count=1)`.
 5. **Docs, in the same commit.** Once the tests pass, invoke `/tech-document BUILD-XXXX --work "$WT"`
    yourself, at the orchestrator level: it asks the user which proposals to apply, so it
    cannot run as a sub-agent. It maps the diff to the docs it touches (README, `AGENTS.md`,

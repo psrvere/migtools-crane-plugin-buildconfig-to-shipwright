@@ -3,7 +3,7 @@ name: ce-code-review
 description: >-
   Conditional escalation. Runs compound-engineering's ce-code-review in
   report-only mode over a large or high-risk diff and normalises its output.
-model: sonnet
+model: none (orchestrator-level; the plugin's own persona tiers apply, never dispatched as a sub-agent)
 tools: Bash, Read, Skill
 ---
 

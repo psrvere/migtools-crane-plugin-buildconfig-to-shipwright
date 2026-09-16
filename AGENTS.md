@@ -85,11 +85,13 @@ GOTOOLCHAIN=auto go test -tags documentation ./buildconfig
 
 The two suites never overlap: a red documentation check names a doc to fix and does not turn the functional run red, and a functional failure does not block the documentation run.
 
-### 2. Plugin E2E Tests
-Tests the plugin binary with crane, processing input YAMLs and asserting output transformations:
+### 2. Plugin conversion tests
+Every fixture under `tests/testdata/NN-*` runs through `plugin.Run()` and is compared with
+its `expected_<Kind>.yaml` goldens. No crane binary, no cluster; details in
+[`tests/README.md`](tests/README.md):
 
 ```bash
-./tests/e2e-transform.sh
+(cd tests && GOTOOLCHAIN=auto GOWORK=off go test ./e2e -count=1)
 ```
 
 ### 3. Cluster E2E Tests
@@ -220,13 +222,32 @@ landed with the documentation PRs (#64, #65, #66 to #68, #70).
   `NewResources` landed in crane commit `24eafd8` on 13 August 2026, and that tag is the
   first to carry it. For testing a branch, build crane from the commit
   `.github/workflows/test-e2e-minikube-pr.yml` pins and put it first on `PATH` before running
-  `tests/e2e-transform.sh`. Users install a crane release and add the plugin with
-  `crane plugin-manager add`; the README covers that.
+  `tests/e2e-cluster.sh`. Users install a crane release and add the plugin with
+  `crane plugin-manager add`; the README covers that. The symptom of an old crane is quiet:
+  the transform logs `converted-with-warnings`, the BuildConfig is whited out, and no Build
+  appears under `transform/` or `output/`. Check `crane version` before trusting an empty
+  output. The current `crane apply` takes no `--export-dir`: it reads `export/` from the
+  working directory, so run it from the directory that holds `export/`. `--transform-dir`
+  and `--output-dir` still exist and default to `transform/` and `output/` there.
 - Run the Go suite as CI does: `GOWORK=off go test ./... -count=1` for the functional suite,
   and `GOWORK=off go test -tags documentation ./buildconfig -count=1` for the doc suite. The
   workspace `go.work` outside this repo can resolve different dependency versions.
 - On OpenShift, `kubectl get build/<name>` is the OpenShift Build API. Write
   `build.shipwright.io/<name>`.
+- A Build with a Local source (what a binary BuildConfig becomes) starts only with
+  `shp build upload <build> <directory> -F`. A BuildRun created any other way waits out
+  `spec.source.local.timeout` and fails. `shp` has no `--context` flag; to target a cluster
+  that is not the current context, write a minimal kubeconfig with
+  `oc config view --minify --flatten --raw --context <ctx>`, pass it as `KUBECONFIG`, and
+  delete the file afterwards, since it carries a token.
+- The Builds for Red Hat OpenShift operator needs an `openshift-builds` namespace even when
+  both operators are subscribed into `openshift-operators`. Without it `OpenShiftBuild/cluster`
+  reports `SharedResourceReconcileFailed` and no ClusterBuildStrategy appears. Create the
+  namespace first.
+- Fixtures under `tests/testdata/` and worked examples under `docs/examples/` use generic
+  names only. Material that came from a customer is reshaped before it lands here: no
+  customer name, namespace, application, image or hostname, in the files, the commit message
+  or the pull request. The repository is public.
 - A BuildRun with `serviceAccount` unset runs as the namespace `pipeline` account. That is
   right only when the plugin generated no ServiceAccount. When it did, the generated account
   carries the BuildConfig's pull secret and the plugin names it in the

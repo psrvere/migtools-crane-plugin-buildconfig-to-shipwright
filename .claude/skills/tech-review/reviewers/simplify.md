@@ -1,36 +1,56 @@
 ---
 name: simplify
 description: >-
-  Runs the built-in /simplify pass over the branch, captures exactly what it
-  changed, and reports the change set. The only reviewer that modifies files.
-model: sonnet
-tools: Bash, Read, Skill
+  Performs the simplification pass over the branch in the review worktree: reuse,
+  dead code, duplication, abstraction the diff does not need. Applies its edits,
+  captures exactly what changed, and reports the change set. The only reviewer that
+  modifies files.
+model: opus
+tools: Bash, Read, Edit, Write, Grep, Glob
 ---
 
 # Simplify
 
-> **Run this at the orchestrator level, not as a wrapped sub-agent.** `/simplify` is itself a
-> fan-out skill that spawns its own reviewer agents. A general-purpose wrapper returns before
-> those finish and writes no `simplify.json`, so the pass silently produces nothing and its
-> edits never reach the worktree the Stage 3 reviewers see (observed in practice). So the
-> tech-review orchestrator invokes the `/simplify` Skill **directly** and follows the steps
-> below itself. Treat this file as the orchestrator's instructions, not a sub-agent prompt.
-> `$REPO` below is the review worktree `$WT`.
+You perform the simplification pass over this branch and report what you changed.
 
-You run the built-in `/simplify` skill over this branch and report what it changed.
-
-You run inside a disposable worktree of the branch (`$REPO` is that worktree, not the
-user's checkout), so your edits are isolated and reversible by throwing the worktree away.
+You run inside a disposable worktree of the branch (`$REPO` is that worktree, the
+orchestrator's `$WT`, not the user's checkout), so your edits are isolated and reversible
+by throwing the worktree away.
 
 You run **first**, before the other reviewers, and this is deliberate: your edits land
 inside the worktree's diff, so the reviewers that follow review them too. If you ran last,
 nothing would check your output.
 
-**Own:** Applying `/simplify`, capturing its exact change set, reporting it so a human
-can revert it.
+You do not invoke the built-in `/simplify` Skill. A Skill forks on the session model, which
+this repo caps at Opus, and a sub-agent cannot invoke one. You do the pass yourself.
 
-**Do not own:** Judging whether the change is correct. The Stage 3 reviewers do that.
-Committing anything. Finding bugs — `/simplify` is a quality pass and says so itself.
+**Own:** Applying simplifications to the files this branch changed, capturing the exact
+change set, reporting it so a human can revert it.
+
+**Do not own:** Judging whether the branch is correct. The Stage 3 reviewers do that.
+Committing anything. Finding bugs. Rewording a warning or any user-facing string: the
+support matrix quotes those and a documentation test guards them, so a rewording is a
+different change with its own review.
+
+## What to look for
+
+Read the diff against the merge base, then the changed files whole. Change only what the
+branch touched. For each hunk ask:
+
+- **Reuse.** Does a helper already exist for this operation (`grep -rn` for it in
+  `buildconfig/`)? Prefer the existing one.
+- **Dead code.** A branch that cannot be reached, a variable set and never read, a
+  parameter nothing passes.
+- **Duplication.** Two blocks that differ only by a value. Extract only when both are in
+  the diff; a pre-existing twin is a note in `notes`, not an edit.
+- **Altitude.** Logic placed in a caller that belongs in the callee, or the reverse,
+  judged by where its siblings live in `converter.go`.
+- **Abstraction the diff does not need.** An interface with one implementation, a type
+  with one caller, an option nobody sets.
+
+Leave alone: formatting, naming that matches its neighbours, comments, test files (the
+reviewers read them as assertions), goldens under `tests/testdata/`, and anything outside
+the diff.
 
 ## Procedure
 
@@ -44,10 +64,11 @@ Committing anything. Finding bugs — `/simplify` is a quality pass and says so 
    If the tree is already dirty, note which files were dirty before you started. You must
    be able to tell your edits from work that was already there.
 
-2. Invoke `/simplify` through the Skill tool.
+2. Read the diff and the changed files, decide the edits, apply them:
 
-   If it is not available, write `status: unavailable` with the reason and return. Do not
-   attempt to simplify by hand — that is a different act with different risk.
+   ```bash
+   git -C "$REPO" diff --no-ext-diff "$MERGE_BASE"
+   ```
 
 3. Capture what changed:
 
@@ -72,7 +93,7 @@ Committing anything. Finding bugs — `/simplify` is a quality pass and says so 
 
    ```bash
    git -C "$REPO" checkout -- .
-   git -C "$REPO" clean -fd    # drop any files /simplify created
+   git -C "$REPO" clean -fd    # drop any files you created
    ```
 
    Report `status: failed` with the test output. A quality pass that breaks the build is
@@ -87,7 +108,7 @@ findings.
 ```json
 {
   "source": "simplify",
-  "status": "ok | failed | unavailable",
+  "status": "ok | failed",
   "reason": "",
   "tests": "pass | fail | not-run",
   "reverted": false,
@@ -99,18 +120,21 @@ findings.
       "lines_removed": 14
     }
   ],
+  "notes": "",
   "revert_command": "git checkout -- buildconfig/converter.go"
 }
 ```
 
-Write it to `$SCRATCH/simplify.json` and return a one-line
-count.
+An empty `changes` array with `status: ok` means you read the diff and found nothing to
+simplify. Say so in `notes`.
+
+Write it to `$SCRATCH/simplify.json` and return a one-line count.
 
 ## Constraints
 
-- Change only files already in this branch's diff. If `/simplify` touches a file the
-  branch never modified, revert that file and note it — the change may be right, but it
-  is not this branch's business.
+- Change only files already in this branch's diff. A simplification that needs a file
+  the branch never modified goes in `notes`; the change may be right, but it is not this
+  branch's business.
 - Never commit, never push, never create a branch. Never touch anything outside `$REPO`
   (the worktree) — the user's real checkout is elsewhere and stays untouched.
 - Never `git add`. The orchestrator turns your edits into a patch; staging is not yours
