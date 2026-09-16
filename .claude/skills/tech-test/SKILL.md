@@ -1,7 +1,7 @@
 ---
 name: tech-test
 description: Run the unit or cluster test stage for a BuildConfig-to-Shipwright migration issue. The unit stage compiles the branch and runs the Go suite with no cluster; the cluster stage generates a classification-driven test plan and runs it end to end on OpenShift. Trigger when the user says "tech-test", "test BUILD-XXXX", "cluster test", or "run tests for this issue".
-argument-hint: <ISSUE-KEY> [unit|cluster]
+argument-hint: <ISSUE-KEY|branch> [unit|cluster]
 allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, AskUserQuestion]
 ---
 
@@ -36,7 +36,14 @@ The user invoked this with: $ARGUMENTS
 
 Parse two tokens:
 
-1. **Issue key** — must match `BUILD-[0-9]+`. Required. If absent, ask; do not guess.
+1. **Issue key or branch name** — a key matching `BUILD-[0-9]+`, or a branch name given
+   verbatim. Required. If absent, ask; do not guess. A branch name is the path for work that
+   has no story yet. U1 matches it whole. Wherever this file writes `BUILD-XXXX` into a
+   path, a strategy copy or a heading, use the branch name with every `/` replaced by `-`
+   (`SLUG="$(printf '%s' "<branch>" | tr '/' '-')"`), so `buildah-BUILD-XXXX` becomes
+   `buildah-<slug>` and the sed in C4 keeps working. C0 has no design doc to read; ask
+   for the classification. Every report header and the compliance table print
+   `no BUILD key: <branch>`, and the U7 `Next:` line says the key is owed before a PR.
 2. **Stage** — `unit` or `cluster`. Optional; **defaults to `unit`**.
 
 After a `unit` run finishes, print the next command in the sequence. Never run the cluster
@@ -60,7 +67,7 @@ Throughout this skill, `<Label>` means the path stored under that label in `repo
 
 | Label | Role in testing |
 |---|---|
-| Crane Plugin Repo | **The code under test.** `buildconfig/` holds the conversion; `tests/e2e-transform.sh` is the offline pipeline harness |
+| Crane Plugin Repo | **The code under test.** `buildconfig/` holds the conversion; `tests/e2e/` is the offline conversion suite (goldens under `tests/testdata/`) and `tests/e2e-cluster.sh` the cluster harness |
 | Strategy Catalog Repo | **The source of every ClusterBuildStrategy under test** |
 | Designs Directory | Design docs (classification) and `test-results/BUILD-XXXX-artifacts/` |
 | Crane Repo | Source for the `crane` CLI, if it is not already on `PATH` |
@@ -186,6 +193,16 @@ git for-each-ref --format='%(refname:short)' \
 - Several → show them and ask which.
 - None → stop with **BLOCKED: no branch found for BUILD-XXXX**. Do not test `main`.
 
+A branch name given instead of a key is matched whole across the same refs, after the
+remote prefix is stripped, so a branch that lives only on the fork still resolves:
+
+```bash
+git for-each-ref --format='%(refname)' refs/heads refs/remotes \
+  | sed -E 's#^refs/heads/##; s#^refs/remotes/[^/]+/##' | sort -u | grep -x "<branch>"
+```
+
+Use the local ref when one exists, else `fork/<branch>`.
+
 ## U2 — Isolate
 
 Other agents share this checkout. Work in a worktree, and confirm it has its own index:
@@ -248,21 +265,22 @@ proxy replaces per-test lines with a summary. Read the summary, not a grep count
 Two things that look like they need a cluster and do not. Run whichever the issue's
 classification calls for.
 
-**The pipeline harness** — export → transform → verify, over the sample data committed in
-the repo:
+**The offline conversion suite** — every fixture under `tests/testdata/NN-*` runs through
+`plugin.Run` and is diffed against its `expected_*.yaml` golden, or its
+`expected_annotations.json` when the BuildConfig passes through:
 
 ```bash
-GOWORK=off bash tests/e2e-transform.sh ; echo "exit=$?"
+(cd tests && GOWORK=off go test ./e2e -count=1) ; echo "exit=$?"
 ```
 
-The harness shells out to whatever `crane` is on `PATH`, and the plugin requires a `crane`
-new enough to carry the `NewResources` API. An older binary (e.g. `crane` v0.0.5) makes the
-transform emit only whiteouts with no Build, and `crane apply` reject `--overwrite` — the
-harness reports FAIL for code that is fine. Before blaming the branch, run the harness
-against `origin/main` too: a byte-identical failure there is a stale-`crane` environment
-problem, not a defect. When `crane` cannot be upgraded, skip the harness and use the stdin
-drive below as the offline conversion check — it exercises the same `plugin.Run` path
-without the crane binary. Record which check ran, and why, in the U7 report.
+It needs no `crane` binary and no cluster. `tests/e2e-transform.sh` no longer exists; the
+Ginkgo suite replaced it when the test framework merged. The `crane` version trap lives in
+the cluster stage instead: `tests/e2e-cluster.sh` shells out to whatever `crane` is on
+`PATH`, and a `crane` older than v0.11.0-alpha.1 runs the plugin, logs
+`converted-with-warnings`, whites out the BuildConfig and writes no Build anywhere. Check
+`crane version` before trusting an empty `output/`. The current `crane apply` takes no
+`--export-dir`: it reads `export/` from the working directory, so run it there.
+`--transform-dir` and `--output-dir` still exist and default to `transform/` and `output/`.
 
 **Any conversion, offline — drive the plugin binary directly** (`crane-conversion` /
 `field-mapping`, and the reliable fallback when the harness is blocked by a stale `crane`).
@@ -305,11 +323,14 @@ Branch:   <resolved-branch> @ <short-sha>
 Build:    exit 0
 Vet:      exit 0
 Tests:    N passed, M failed — exit 0
-Harness:  <ran | n/a for this classification> — exit 0
+Suite:    tests/e2e — exit 0
 Verdict:  PASS | FAIL (what failed)
 
 Next: /tech-review BUILD-XXXX (if available), then /tech-test BUILD-XXXX cluster
 ```
+
+With a branch name in place of a key, the first line reads `tech-test unit — no BUILD key:
+<branch>` and the `Next:` line adds: `A BUILD key is owed before this branch becomes a PR.`
 
 On any failure: stop, show the failing output verbatim, and do not suggest the cluster stage.
 
@@ -728,6 +749,30 @@ parameter or volume that is missing.
 admission, so the BuildConfig can never exist on a cluster and the case is unreachable
 there. Record it `N/A (unit-only)` in the cluster matrix rather than trying to schedule it.
 
+### Dropped, failed or skipped outcomes on inputs the API server accepts — cluster run required
+
+The exemption above is for inputs that cannot exist on a cluster. It does not cover a
+disposition the design chose: a `failed` outcome, a warn-and-drop, or a `skipped`
+strategy on a BuildConfig that applies cleanly. Those are claims that the target cannot
+do it, and a unit test asserting the rejection only proves that the code rejects. For each
+such row:
+
+1. Apply the BuildConfig and run the baseline (Hard Rule 5). If it applies, the row is
+   cluster-reachable and stays in the cluster matrix.
+2. Hand-write the closest Shipwright form the design says cannot work: the Build the
+   converter would emit if it did not drop. Run it the way a user would, `shp build upload`
+   for a Local source, a BuildRun otherwise.
+3. Record the failure with the controller's reason. **A success flips the design**: mark
+   the row `FAIL` with the reason `design chose a drop; the dropped form ran`, set the
+   verdict to `FAIL`, stop, and open a bug story for the reversal under the same epic, the
+   way BUILD-2475 reversed BUILD-2271. `/tech-design` then runs on the new key with this
+   evidence in the story.
+
+A binary BuildConfig applies declaratively; only its Build needs `oc start-build`. The
+BUILD-2271 results doc marked its rejection row `PASS (unit test)` on the note that the
+input "cannot be created declaratively on cluster". The rejected form registered and ran on
+the first try when it was finally applied, on 2026-09-16.
+
 ## C6 — Run and verify
 
 **Smoke first.** The very first cluster action is one complete end-to-end run of a single
@@ -946,7 +991,7 @@ Earned the hard way. Do not rediscover them.
 | 27 | A Build overriding a volume the strategy does not declare fails with `UndefinedVolume`; a strategy step mounting an overridable volume writable fails with `volume mount must be read only`. |
 | 28 | `--optional-flags` keys are flag constants; the value is the whole `k=v` mapping. A bare mapping as the key silently no-ops. Verify `spec.strategy.name` changed. |
 | 29 | Check the strategy's parameters against what the conversion emits **before** generating the matrix. A mismatch fails every Build with `UndefinedParameter`. |
-| 30 | Cases the API server rejects at admission (invalid `from.kind`, empty required fields) are unreachable on a cluster. Test them in the unit stage; mark `N/A (unit-only)`. |
+| 30 | Cases the API server rejects at admission (invalid `from.kind`, empty required fields) are unreachable on a cluster. Test them in the unit stage; mark `N/A (unit-only)`. A drop or failure the *design* chose on a valid input is not this case: apply the closest converted form by hand and watch it fail. If it runs, the row is `FAIL` and the reversal is a new bug story. |
 
 ## Reading results
 
@@ -973,6 +1018,7 @@ Earned the hard way. Do not rediscover them.
 | 44 | An output-filtering proxy can replace `go test -v` per-test lines with a summary, so `grep -c -- "--- PASS"` yields 0. Read the summary. |
 | 45 | A temporary cluster can vanish mid-run. Zone-wide `NXDOMAIN` on `api.<cluster>` and `*.apps.<cluster>` with working public DNS means the cluster is gone, not the VPN. Snapshot resources early; record in-flight legs BLOCKED, not FAIL. |
 | 46 | Tekton's webhook can return `no endpoints available` and kill a taskrun mid-push. Retry once the webhook recovers. |
+| 47 | A binary BuildConfig (`binary: {}` or `asFile`) applies declaratively; only its Build needs `oc start-build --from-dir` or `--from-file`. Never mark a binary row unit-only. |
 
 # Error Handling
 

@@ -144,11 +144,12 @@ cd /path/to/crane-plugin-buildconfig-to-builds
 go build -o crane-plugin-buildconfig-to-builds .
 ```
 
-### 2. Run E2E Transform Test
+### 2. Run the offline conversion suite
 
 ```bash
-# This tests the transform pipeline without applying to a cluster
-./tests/e2e-transform.sh
+# Every fixture under tests/testdata goes through the plugin and is diffed against
+# its goldens. No crane binary, no cluster; see tests/README.md
+(cd tests && GOWORK=off go test ./e2e -count=1)
 ```
 
 ### 3. Test on Real Cluster

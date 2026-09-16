@@ -38,7 +38,9 @@ Every capability this migration cares about travels a chain, and each link has a
 different owner. Knowing which link is broken is the whole job of Phase 3.
 
 ```text
-BuildConfig field
+oc / API server                  openshift/oc: what populates the field, and when
+  → openshift/builder             how OpenShift consumed the field at build time
+  → BuildConfig field
   → Shipwright Build API          Upstream Shipwright Build Repo, pkg/apis/
   → ClusterBuildStrategy           Strategy Catalog Repo
   → buildah / s2i                  external, pinned to the strategy's image tag
@@ -47,6 +49,16 @@ BuildConfig field
 
 The plugin sits beside the chain, not in it: `buildconfig/converter.go` decides what to
 emit, and it is where a warn-and-drop lives.
+
+The two links above `BuildConfig field` are the source side. A field's API comment says
+what it is for; only `oc` and `openshift/builder` say what it held in practice and what
+the build did with it. Both have already decided a story: `asFile` is set on the
+instantiated Build by `oc start-build --from-file`, so a BuildConfig almost never carries
+it, and BUILD-2271 wrongly treated the absent form as the unsupported one. `dockerStrategy.env`
+reads as "pass into a builder container", and `openshift/builder` inserts it as an `ENV`
+after `FROM`, which `spec.env` on a Shipwright Build does not do. Walk both links for
+every `field-mapping` and `crane-conversion` story that touches a source or strategy
+field, and cite them in Current State.
 
 ## Ceremony class
 
@@ -289,6 +301,9 @@ Checked via the GitHub API, never cloned, and always at the version the strategy
 | buildah | `podman-container-tools/buildah` | buildah flag stories |
 | s2i | `openshift/source-to-image` | s2i flag stories |
 | OpenShift Build API | `openshift/api` | BuildConfig field mapping |
+| OpenShift build engine | `openshift/builder` | Every `field-mapping` and `crane-conversion` story touching a source or strategy field: how OpenShift consumed it (`pkg/build/builder/`) |
+| oc | `openshift/oc` | Fields populated at start time: `oc start-build` flags, binary sources, webhooks |
+| Shipwright CLI | `shipwright-io/cli` | Local and bundle sources: what `shp build upload` streams, and what a BuildRun waits for |
 | Tekton | `tektoncd/pipeline` | creds mounting, TaskRun behavior |
 | Tekton Triggers | `tektoncd/triggers` | webhook and trigger stories |
 | Pipelines as Code | `openshift-pipelines/pipelines-as-code` | trigger stories on OpenShift |
@@ -401,6 +416,19 @@ strips nulls today and must be deleted. It only ever existed on an unmerged cran
 branch, and the plugin was emitting the nulls with no workaround at all. The story's
 scope item read "delete the workaround"; the true scope item was "there is no
 workaround".
+
+**Premise check, for a story that says a behaviour is wrong.** "Fix inverted", "should
+reject", "is not supported": a story worded as a correction hands you a guard and asks
+which side of it is right. Before choosing a side, write one line answering *what does
+the code do with the guard removed, and what cited evidence says that breaks?* If nothing
+cited breaks, the guard is the bug, not its direction, and the scope item becomes
+"remove the guard". Record the line in Current State.
+
+_(Origin: BUILD-2271 flipped a `binary.asFile` check on the claim that Shipwright's Local
+source takes a file and not a directory. Neither side of the check was needed:
+`shp build upload` streams a directory, which is what `oc start-build --from-dir` fed the
+BuildConfig. Every real binary BuildConfig then failed conversion, and the first client
+sample set, eight of eight, hit it.)_
 
 Answer one question: *should this be built?* Check cheapest first and stop at the first
 hit. This phase runs before any expensive research, because four documents in the prior
@@ -683,6 +711,15 @@ Nothing else, and one per row. A row carrying `story:` and `N/A:` together passe
 Phase 6 grep and says two things; split it. `✅ merged, PR #15` is not a disposition; it
 is a status, and it belongs in Jira.
 
+**`N/A`, and any `failed` or dropped outcome, is a claim about the target and carries the
+target's evidence.** Cite, at grade A or B, the upstream line or document that shows
+Shipwright cannot hold the value, and name the closest target construct that was tried
+and why it does not fit. "Shipwright's local source takes a directory, not an archive"
+was the written justification for failing every `binary: {}` BuildConfig. It is true, and
+it is the reason the conversion works, because a directory is what those builds streamed.
+A justification that does not survive one look at the target's CLI or controller is not
+one. Grade C or D on an `N/A` row blocks `proceed` the same way it blocks `plugin-gap`.
+
 **The table's absence is itself a blocking failure**, not only a blank row. A spec with
 no destination-needs table cannot reach `proceed`. Check it:
 
@@ -696,6 +733,29 @@ is a blocking gap.
 _(Origin: Audit 1 §3 — six P1 silent drops with no story, because scope was walked
 per-source-field and never per-destination-outcome. This is the only rule in this skill
 that comes from a real incident. Treat it accordingly.)_
+
+### 3d. Field in the wild (MANDATORY for `field-mapping` and `crane-conversion`)
+
+The API type says what a field may hold. The corpus says what it does hold. Before
+dispositioning a row, grep every BuildConfig the workspace has for the field and record
+the shapes seen, with counts:
+
+```bash
+cd "<Crane Plugin Repo>"
+grep -rl "<field>" tests/testdata docs/examples ; echo "exit=$?"
+# plus any client-sample directory the workspace keeps beside the repos
+# (client-samples/ today), and `oc get bc -A -o yaml` when a cluster is logged in
+```
+
+Read the exit code: `1` is a real zero, `2` is a path that does not exist, and stderr
+stays visible so the two never look alike.
+
+Write the result into Current State as one line per shape, for example
+`binary: {} — 8 of 8 client samples; binary.asFile — 0`. A row whose common shape is the
+one being dropped or failed is a P1 finding, whatever the story says.
+
+_(Origin: the first client sample set, 2026-09-16. Eight of eight used the form the plugin
+rejected, and no fixture in the repo carried the form it accepted.)_
 
 ## Phase 4: Design
 
@@ -795,6 +855,12 @@ checkbox settles them:
   than a fabricated pair?
 - Are the acceptance criteria genuinely pass/fail, or do they contain a word like
   "correctly" that nobody can test?
+- Does every `N/A` or dropped row cite the target at grade A or B, and name the closest
+  target construct that was tried?
+- For a correction-worded story, is the premise check written, and does it cite what
+  breaks with the guard removed?
+- For `field-mapping` and `crane-conversion`, does Current State carry the field-in-the-wild
+  shapes with counts?
 
 **On `path:line` in the Files Reference table.** A line number is required only where one
 exists. Use the forms below rather than inventing a number or leaving the row out:
@@ -907,6 +973,16 @@ The rule below replaces every per-path exception.
 A section whose phase did not run is **omitted**, not stubbed with `N/A`. An omitted
 section is legible; a stubbed one is noise that looks like work.
 
+A Testing Plan for a story that changes what the converter emits or accepts names the e2e
+golden it adds or changes: the directory under `tests/testdata/`, its `buildconfig.yaml`,
+and either the `expected_<Kind>.yaml` files or `expected_annotations.json`. `/tech-implement`
+creates it and `/tech-review` check 5d looks for it. A unit test proves a branch; a golden
+proves the whole emitted resource, and it is the artifact a reviewer can read.
+
+_(Origin: BUILD-2475. The rejection it reversed shipped with a unit test asserting the
+rejection and no golden, and the two goldens that proved the fix came from nobody's
+checklist.)_
+
 `capability:` frontmatter takes the value matching the path:
 
 | Path | `capability:` |
@@ -948,6 +1024,9 @@ What the issue asks for, why it matters for the migration, who is affected.
 ## Current State
 What exists today, verified, with `path:line` citations and an evidence grade per claim.
 Chain position: which link owns the gap.
+Source side: what populates the field and what OpenShift did with it, cited (`oc`, `openshift/builder`).
+Field in the wild: the shapes the corpus holds, with counts (3d).
+Premise check, when the story is worded as a correction.
 
 ## Prior Art
 An existing implementation of this shape, cited by file and line, or "none found".
@@ -977,6 +1056,7 @@ The approach, in enough detail that no design decisions remain.
 | Layer | What | Count |
 |---|---|---|
 | Unit | | |
+| e2e golden | `tests/testdata/NN-<slug>/`: `buildconfig.yaml` plus `expected_<Kind>.yaml` per generated resource, or `expected_annotations.json` for a passthrough | |
 | Cluster | | |
 
 ## Out of Scope
