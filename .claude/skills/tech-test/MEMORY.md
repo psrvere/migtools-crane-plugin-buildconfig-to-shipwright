@@ -134,3 +134,12 @@ now. Promoted to Hard Rule 7.)*
 - Worktree-isolated sessions reject multi-statement bash and inline monitor scripts as "too complex". Write each multi-step operation to a scratch `.sh` file and invoke it as one command.
 - An output-filtering proxy replaces `go test -v` per-test lines with a summary, so `grep -c -- "--- PASS"` yields 0. Use the summary for counts.
 - Type: GOTCHA_ADDED, VERIFICATION_TIP
+
+## Run: BUILD-2475 (2026-09-16) — crane-conversion, binary Local source — ALL PASS
+- Cluster: ROSA 4.20-class (k8s v1.33.13), fresh; Pipelines 1.23.2 + Builds 1.9.0 subscribed into `openshift-operators`.
+- `OpenShiftBuild/cluster` stayed Ready=False with `Failed to reconcile SharedResource: namespaces "openshift-builds" not found` even though both Subscriptions targeted `openshift-operators`. `oc create namespace openshift-builds` unblocked it within a minute. Create that namespace up front on a fresh cluster.
+- crane v0.0.5 on PATH ran the plugin, logged `converted-with-warnings`, whited out the BuildConfig, and wrote **no Build** anywhere: it predates plugin `NewResources`. The README minimum v0.11.0-alpha.1 writes the Build under `transform/10_BuildConfigToBuildsPlugin/new/` and `output/resources/<ns>/`. Check `crane version` before trusting an empty output. The new `crane apply` takes no `-e`/`-t`/`-o`; run it from the directory holding `export/` and `transform/`.
+- `oc wait build/<name>` targets `builds.build.openshift.io` on OpenShift; use `builds.shipwright.io/<name>` for the Shipwright Build.
+- A Local-source Build runs with `shp build upload <build> <dir> -F`; the BuildRun with no `serviceAccount` set pushed to the internal registry on the downstream operator.
+- The OpenShift binary baseline log shows `STEP 2/6: ENV "artifact_url"=… "artifact_name"=…` after `FROM`; the Shipwright buildah step printed `artifact_url=[]` for the same `RUN`. `dockerStrategy.env` → `spec.env` is lossy for Dockerfiles that read the variable.
+- Type: GOTCHA_ADDED, BUG_FOUND

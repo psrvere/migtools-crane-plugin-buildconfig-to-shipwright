@@ -742,10 +742,10 @@ func (c *Converter) generateServiceAccount(bc *buildv1.BuildConfig, pullSecret *
 
 // processSource maps the BuildConfig source onto the Build. It returns an error
 // when the source cannot be represented in Shipwright at all (multiple source
-// types, an extracted binary archive, multiple image sources, or an
-// unresolvable image) — those leave the Build with no usable source, so the
-// caller fails the whole conversion rather than shipping an incomplete Build
-// (BUILD-2318). Degradations that still yield a usable source (ignored image
+// types, multiple image sources, or an unresolvable image) — those leave the
+// Build with no usable source, so the caller fails the whole conversion rather
+// than shipping an incomplete Build (BUILD-2318). Degradations that still yield
+// a usable source (a binary source that needs an upload to run, ignored image
 // As/Paths, an absent source, a non-git sourceSecret) are warnings, not errors.
 // The inline Dockerfile is handled earlier by processInlineDockerfile.
 func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.Build) error {
@@ -817,18 +817,27 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		b.Spec.Source = source
 		c.processGitProxyConfig(bc, b)
 	} else if binary != nil {
-		source := &shipwrightv1beta1.Source{
+		// A binary BuildConfig received its input at each start: oc start-build
+		// --from-dir streamed a directory, --from-archive an archive OpenShift
+		// extracted, --from-repo a checkout; each became the build context, and
+		// --from-file placed one file in it under asFile. A Shipwright Local
+		// source is the same directory
+		// upload, driven by `shp build upload` instead of oc, so both forms
+		// convert to it. Nothing feeds a Local source on its own: a BuildRun
+		// started without the upload waits out the timeout and fails, so the
+		// warning tells the user how to start the build.
+		b.Spec.Source = &shipwrightv1beta1.Source{
 			Type: shipwrightv1beta1.LocalType,
 			Local: &shipwrightv1beta1.Local{
 				Name:    "local-copy",
 				Timeout: &metav1.Duration{Duration: Timeout},
 			},
 		}
-		if bc.Spec.Source.Binary.AsFile == "" {
-			return fmt.Errorf("binary archive source (extracted archive) is not supported in Shipwright, only single-file binary sources (asFile) (BuildConfig %s)", bc.Name)
+		if asFile := binary.AsFile; asFile != "" {
+			c.warnf("BuildConfig %s/%s has a binary source with asFile %q, so OpenShift placed the file streamed by oc start-build --from-file at that name in the build context. The Build has a Local source instead, which takes a directory: put the file in a directory as %q and start each build with 'shp build upload %s <directory>'. A BuildRun started any other way waits %s for the upload and then fails.", bc.Namespace, bc.Name, asFile, asFile, bc.Name, Timeout)
+		} else {
+			c.warnf("BuildConfig %s/%s has a binary source with no asFile, so OpenShift built whatever oc start-build --from-dir, --from-archive or --from-repo streamed in. The Build has a Local source instead, and nothing feeds it on its own: start each build with 'shp build upload %s <directory>' so that directory becomes the build context, the way --from-dir did. A BuildRun started any other way waits %s for the upload and then fails.", bc.Namespace, bc.Name, bc.Name, Timeout)
 		}
-		c.Log.Infof("Processing binary source as single file (asFile: %s). BuildConfig: %s", bc.Spec.Source.Binary.AsFile, bc.Name)
-		b.Spec.Source = source
 	} else if len(images) > 0 {
 		if len(images) > 1 {
 			// Several source.images entries is the artifact chain with more

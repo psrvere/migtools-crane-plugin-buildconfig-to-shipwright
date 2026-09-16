@@ -155,11 +155,6 @@ func TestConvertOutcomeFailedBrokenSource(t *testing.T) {
 			"strategy": {"type": "Docker", "dockerStrategy": {}},
 			"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/app:latest"}}
 		}}`,
-		"binary archive without asFile": `{"spec": {
-			"source": {"type": "Binary", "binary": {}},
-			"strategy": {"type": "Docker", "dockerStrategy": {}},
-			"output": {"to": {"kind": "DockerImage", "name": "quay.io/example/app:latest"}}
-		}}`,
 		"multiple image sources": `{"spec": {
 			"source": {"type": "Image", "images": [
 				{"from": {"kind": "DockerImage", "name": "quay.io/example/a:latest"}},

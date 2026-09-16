@@ -1,0 +1,38 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: binary-app
+  namespace: buildconfig-test
+  labels:
+    app: binary-app
+spec:
+  failedBuildsHistoryLimit: 2
+  successfulBuildsHistoryLimit: 2
+  runPolicy: Serial
+  output:
+    to:
+      kind: DockerImage
+      name: registry.example.internal/binary-app:1.2.2
+  source:
+    type: Binary
+    binary: {}
+    configMaps:
+      - configMap:
+          name: cluster-ca-certs
+        destinationDir: certs
+    secrets:
+      - secret:
+          name: nexus
+        destinationDir: nexusSecret
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      from:
+        kind: DockerImage
+        name: registry.example.internal/base-images/java/openjdk-21:latest
+      env:
+        - name: artifact_url
+          value: https://nexus.example.internal/repository/deploy/app.jar
+        - name: artifact_name
+          value: app.jar

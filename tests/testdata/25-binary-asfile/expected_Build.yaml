@@ -1,0 +1,29 @@
+apiVersion: shipwright.io/v1beta1
+kind: Build
+metadata:
+  annotations:
+    buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
+    crane.konveyor.io/conversion-warnings: |-
+      [binary-test/binary-file-app] BuildConfig binary-test/binary-file-app has a binary source with asFile "app.jar", so OpenShift placed the file streamed by oc start-build --from-file at that name in the build context. The Build has a Local source instead, which takes a directory: put the file in a directory as "app.jar" and start each build with 'shp build upload binary-file-app <directory>'. A BuildRun started any other way waits 10m0s for the upload and then fails.
+      [binary-test/binary-file-app] No explicit pushSecret found for DockerImage output. Set spec.output.pushSecret to a registry credential secret, or ensure the BuildRun ServiceAccount carries credentials for the target registry; otherwise the push will fail.
+      [binary-test/binary-file-app] BuildConfig binary-file-app uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
+    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/binary-file-app
+  name: binary-file-app
+  namespace: binary-test
+spec:
+  output:
+    image: registry.example.internal/binary-file-app:1.0.0
+  paramValues:
+  - configMapValue: null
+    name: dockerfile
+    secretValue: null
+    value: Dockerfile
+  source:
+    local:
+      name: local-copy
+      timeout: 10m0s
+    type: Local
+  strategy:
+    kind: ClusterBuildStrategy
+    name: buildah
+

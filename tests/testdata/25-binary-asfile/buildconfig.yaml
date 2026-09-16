@@ -1,0 +1,21 @@
+# A Docker build whose input is one file: 'oc start-build --from-file=app.jar'
+# placed the file at asFile in the build context. Both binary forms convert to a
+# Local source; this one gets the asFile warning (W68).
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: binary-file-app
+  namespace: binary-test
+spec:
+  output:
+    to:
+      kind: DockerImage
+      name: registry.example.internal/binary-file-app:1.0.0
+  source:
+    type: Binary
+    binary:
+      asFile: app.jar
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile

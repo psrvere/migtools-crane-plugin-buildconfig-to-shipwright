@@ -82,7 +82,7 @@ and five more on an error. The rest only add to the Build or warn.
 | 4 | Pull secret | inline, `getPullSecret`, `generateServiceAccount` | the strategy's `pullSecret`, `spec.serviceAccount` | a new ServiceAccount carrying the secret, only when the BuildConfig names no service account | serialization error: failed |
 | 5 | Named service account | inline in `Convert` | `spec.serviceAccount` | nothing; warns that its secrets and RBAC must be recreated by hand | no |
 | 6 | Inline Dockerfile | `processInlineDockerfile` in `dockerfile.go` | `spec.source.dockerfile` | Docker strategy: a ConfigMap holding the Dockerfile, plus a pointer annotation on the Build. Source strategy: dropped with a warning | serialization error: failed |
-| 7 | Source | `processSource`, `processGitProxyConfig` | `spec.source` | `spec.source` as Git, Local (single-file binary) or OCIArtifact (one image); `contextDir`; proxy env vars | more than one source type, an archive binary, more than one image, or a bad image reference: failed |
+| 7 | Source | `processSource`, `processGitProxyConfig` | `spec.source` | `spec.source` as Git, Local (either binary form; the build is then started with `shp build upload`) or OCIArtifact (one image); `contextDir`; proxy env vars | more than one source type, more than one image, or a bad image reference: failed |
 | 8 | Output | `processOutput`, `processOutputImageLabels` | `spec.output` and the two mapping flags | `spec.output.image`, `pushSecret`, `labels` | no |
 | 9 | Completion deadline | `processCompletionDeadline` | `completionDeadlineSeconds` | `spec.timeout`; out-of-range values are dropped | no |
 | 10 | Node selector | `processNodeSelector` | `nodeSelector` | `spec.nodeSelector`; if any key is invalid the whole map is dropped | no |
