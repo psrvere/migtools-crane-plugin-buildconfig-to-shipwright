@@ -8,6 +8,13 @@ A [crane](https://github.com/migtools/crane) transform plugin that converts Open
 
 https://github.com/konveyor/enhancements/pull/300
 
+## Development skills
+
+This repo ships nine Claude Code skills under `.claude/skills/` that take a Jira BUILD issue
+from triage to a merged pull request. [`development.md`](development.md) is the map: the
+workflow, what each skill needs and leaves behind, and a walkthrough. Each skill's full
+instructions live in its own `SKILL.md`.
+
 ## Related repositories
 
 - **crane-lib** (`github.com/konveyor/crane-lib`) — provides the plugin interface (`transform.Plugin`), CLI harness (`transform/cli`), and types (`PluginRequest`, `PluginResponse`). This plugin requires an unreleased version of crane-lib that includes the `NewResources` field in `PluginResponse` (pinned to pseudo-version `v0.1.6-0.20260807130033-222a325c7cee` in `go.mod`).
