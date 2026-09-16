@@ -134,3 +134,90 @@ now. Promoted to Hard Rule 7.)*
 - Worktree-isolated sessions reject multi-statement bash and inline monitor scripts as "too complex". Write each multi-step operation to a scratch `.sh` file and invoke it as one command.
 - An output-filtering proxy replaces `go test -v` per-test lines with a summary, so `grep -c -- "--- PASS"` yields 0. Use the summary for counts.
 - Type: GOTCHA_ADDED, VERIFICATION_TIP
+
+## Run: BUILD-2325 (2026-08-24) — volume tests + registry-list sanitizing
+- Stage: unit
+- Classification: crane-conversion
+- Result: PASS (unit 91/91, harness 33/33 with a crane built from migtools/crane@55473f9)
+- Learning: `git worktree add "$TT" <branch>` fails when that branch is already checked out in another worktree (the /tech-implement one). Use `git worktree add --detach "$TT" <branch>` for the test worktree; same tree, own index, and `git branch --show-current` is then empty, so print `git rev-parse --short HEAD` instead.
+- Learning: the Bash tool's shell is zsh, where `${PIPESTATUS[0]}` is empty (zsh spells it `$pipestatus`). A results file written that way records blank exit codes and fails the Definition-of-Done gate. Write the stage as a `.sh` file and run it with `bash`, or redirect each command to a file and read `$?` unpiped.
+- Type: VERIFICATION_TIP
+
+## Run: BUILD-2319 (2026-08-24) — plugin-gap (truthful conversion output) — PASS
+- Stage: cluster — Cluster: OpenShift (K8s v1.33) — Result: PASS
+- Classification is `plugin-gap`; the change only alters warning routing, outcome
+  classification, and opaque annotations (conversion-outcome/-warnings/-reason) + the
+  skipped/failed disposition patch. No param/image/strategy/BuildRun-outcome change, so per
+  the C0 gate this was tested as **state assertions** from the ACs, not baseline/equivalence.
+- Test A: drove the branch plugin over stdin (BuildConfig with git source + docker strategy +
+  GitHub trigger + postCommit) → converted Build stamped `converted-with-warnings` with the
+  postCommit AND GitHub-trigger drop text in `crane.konveyor.io/conversion-warnings` (both
+  bypassed the recorder before this branch), every warning `[ns/name]`-prefixed. Applied the
+  Build → registered=True, annotation survived apply (931 bytes), BuildRun Succeeded (~26s).
+- Test B: Custom-strategy BuildConfig → plugin returned isWhiteOut=false + a JSON patch adding
+  conversion-outcome=skipped + reason. Applied the patch on-cluster via `oc patch --type=json`
+  → BuildConfig carried both disposition annotations AND kept its pre-existing `team=builds`
+  (AC6/AC7). RFC-6901 `~1` escaping resolved to the slashed key correctly.
+- VERIFICATION_TIP: Shipwright Build registration status on this operator (Builds v1.9.0) is a
+  **top-level** `.status.registered` ("True") + `.status.reason`, NOT a
+  `.status.conditions[type==Registered]` array — the conditions jsonpath returns empty. The
+  BuildRun DOES use `.status.conditions[type==Succeeded]`.
+- Bare cluster: OpenShift Pipelines (v1.23.1) + Builds (v1.9.0) installed into
+  openshift-operators; buildah ClusterBuildStrategy appeared ~6 min after CSV Succeeded.
+- Type: VERIFICATION_TIP
+
+## Run: BUILD-2317 (2026-08-24) — strategy param validation
+- Stage: cluster
+- Classification: plugin-policy
+- Cluster: OpenShift 4.20.33 (ROSA), Pipelines 1.23.1 + Builds 1.9.0 installed by the run
+- Result: PASS
+- Learning: a `PluginRequest` on stdin is the resource JSON at the top level plus an optional top-level `extras` map (crane-lib `json:",inline"`), not `{"unstructured": {...}}`; the nested shape fails with `Object 'Kind' is missing`. Emit the Build as JSON and `oc apply -f build.json` directly; no PyYAML is installed here and pip is blocked by PEP 668.
+- Learning: a fresh ROSA cluster took ~8 minutes from Subscription apply to `clusterbuildstrategy/buildah` appearing (CSVs Installing at ~230s, Succeeded at ~270s, strategies ~470s). Bound the poll at 9-10 minutes, not 5.
+- Learning: plugin-policy warning claims are cluster-checkable as state assertions without a baseline: apply the emitted Build and read `status.reason`/`message` (UndefinedParameter at registration), then a BuildRun for the BuildRun-time reasons (MissingParameterValues). Both messages named the same params the plugin warned about.
+- Type: VERIFICATION_TIP
+
+## Run: BUILD-2326 (2026-09-03) — chained-build notices
+- Stage: unit
+- Classification: plugin-policy
+- Result: PASS (unit); harness 31 passed, 2 failed, both pre-existing on origin/main
+- Learning: `tests/e2e-transform.sh` fails the two "mount destinationPath not migrated (strategy owns mount paths)" assertions on origin/main at 223202c with the CI-pinned crane (d566a18). A branch that shows exactly those two is clean; compare against a detached origin/main worktree before blaming it.
+- Learning: when the story branch is already checked out in a `.bcshp-worktrees/` worktree, U2's `git worktree add "$WT" <branch>` refuses ("already checked out"). Use `git worktree add --detach "$WT" <branch>`; the index is still private to the new worktree.
+- Learning: under `zsh -f`, `${PIPESTATUS[0]}` is unset and aborts a `set -u` script; zsh spells it `$pipestatus[1]`. Redirect to a file and read `$?` instead.
+- Type: GOTCHA_ADDED
+
+## Run: BUILD-2438 (2026-09-03) — dead name-collision branch
+- Stage: cluster
+- Classification: plugin-policy
+- Cluster: OpenShift 4.20.35 (ROSA), Pipelines 1.23.2 + Builds 1.9.0 installed by the run into openshift-operators; both CSVs Succeeded in ~60s, `clusterbuildstrategy/buildah` appeared ~5 min after apply
+- Result: PASS (both e2e cases registered and Succeeded; branch vs origin/main binaries byte-identical over 12 inputs)
+- Learning: `tests/e2e-cluster.sh` is Minikube-only and cannot run on OpenShift: its pre-flight wants the BuildConfig CRD (`kubectl get crd buildconfigs.build.openshift.io`), which OpenShift serves as an aggregated API instead, and its `build/<name>` waits resolve to the OpenShift Build API. Run its steps by hand with `build.shipwright.io/<name>`, or teach the script `kubectl api-resources` and the full group.
+- Learning: on OpenShift, map the registry to itself (`registry-mapping` internal=internal); the golden then differs by exactly one line, the "redirected off the internal registry" warning, which the plugin correctly omits. Treat that single-line diff as the expected OpenShift delta, not a failure.
+- Learning: the s2i strategy's pod has no `step-build-and-push` container; fetch logs with `--all-containers`.
+- Type: GOTCHA_ADDED, VERIFICATION_TIP
+
+## Run: BUILD-2459 (2026-09-03)
+- Stage: cluster
+- Classification: field-mapping (S2I scripts, incremental, forcePull to strategy params)
+- Cluster: OpenShift 4.20.35, Builds 1.9.0, Pipelines 1.23.2
+- Result: PASS
+- Learning: `oc wait --for=condition=Registered=True build.shipwright.io/<name>` timed out on a Build whose `.status.reason` was already `Succeeded` / "all validations succeeded"; poll `.status.reason` instead of waiting on the condition. Also: when the baseline `oc start-build` has already pushed the output tag, the migrated incremental BuildRun succeeds on its first run and the buildah log shows `AS cached`, `save-artifacts` and `Restoring previous build artifacts`, so the seed run from gotcha 25 is not needed in a baseline-first flow.
+- Type: VERIFICATION_TIP
+
+## Run: BUILD-2402 (2026-09-10)
+- Stage: unit
+- Classification: plugin-policy
+- Result: PASS (unit and offline harness; cluster not run)
+- Learning: `git worktree add "$WT" <branch>` fails when the branch is already checked out in another worktree (the /tech-implement one), and a following `cd "$WT"` then lands in whatever directory the shell was in, so U3-U5 silently run against the user's checkout on main. Use `git worktree add --detach "$WT" <branch>` and confirm `git rev-parse HEAD` equals the branch tip before running anything.
+- Type: GOTCHA_ADDED
+
+## Run: BUILD-2402 (2026-09-10)
+- Stage: cluster
+- Classification: plugin-policy
+- Cluster: OpenShift 4.20.36 (ROSA), Builds 1.9.0, Pipelines 1.23.2
+- Result: PASS (AC 9 and AC 10)
+- Learning: `crane-plugin-openshift` whiteouts the Shipwright Build this plugin generates. It logs `found build, adding to whiteout` and drops `Build_shipwright.io_v1beta1_*.yaml` between the OpenShiftPlugin stage's input and output, because it matches `Kind: Build` without checking the API group. Run the transform with `--skip-plugins OpenShiftPlugin`, or the migration silently produces no Build. Confirm by diffing the stage's `input/` against its `output/` — there is no patch file, the resource is simply gone.
+- Learning: `crane apply` takes no `--export-dir`; it reads the export from the working directory's default `export/`. Run it from the work dir.
+- Learning: on this cluster the internal registry (`image-registry.openshift-image-registry.svc:5000`) rejects Shipwright buildah pushes with `authentication required` for every account, the default `pipeline` one included. Before blaming a migrated ServiceAccount, run a control BuildRun on the same Build with no `serviceAccount` set. Push to `registry.e2e-registry.svc.cluster.local:80` with a `registries-insecure` paramValue instead.
+- Learning: `oc auth can-i use scc/... --as=<sa>` answers `no` for up to a minute after the RoleBinding lands. Re-check before treating it as a missing grant.
+- Learning: the SCC ClusterRole on an OpenShift Pipelines cluster is `pipelines-scc-clusterrole`, not `system:openshift:scc:pipelines-scc`. A RoleBinding to the latter is accepted by the API server and grants nothing; the BuildRun then fails `PodAdmissionFailed` with `provider "pipelines-scc": Forbidden`. Read the operator's own `pipelines-scc-rolebinding` for the right roleRef.
+- Type: GOTCHA_ADDED, VERIFICATION_TIP

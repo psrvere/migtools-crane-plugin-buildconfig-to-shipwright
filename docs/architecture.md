@@ -241,9 +241,9 @@ the outcome block, and `toUnstructured`. Trust the tests for `processCompletionD
 `processNodeSelector`, `processRunPolicy`, `processBuildsHistoryLimits`,
 `processResources` and `processStrategyVolumes`.
 
-Outside the Go code, read every changed line in `tests/e2e-cluster.sh`,
-`tests/e2e-transform.sh`, the two `expected-build.yaml` golden files, and the workflows
-under `.github/`. Each of those can turn CI green without proving anything.
+Outside the Go code, read every changed line in `tests/e2e-cluster.sh`, the offline suite
+under `tests/e2e/` and `tests/framework/`, every golden under `tests/testdata/`, and the
+workflows under `.github/`. Each of those can turn CI green without proving anything.
 
 ## Rules that must stay true
 

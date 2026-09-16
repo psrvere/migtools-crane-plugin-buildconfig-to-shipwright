@@ -74,6 +74,10 @@ no change anywhere else.
    flag, pass it too as defence in depth — but the private copy is what actually protects the
    shared tree and the Stage 7 patch.
 
+   Run the tool in the foreground and wait for it. Never background it and end your turn
+   "standing by": the orchestrator reads your findings file when you return, and a reviewer
+   that returns before the tool has finished is recorded as `failed`.
+
    Give either tool a generous timeout. If it exceeds it, kill it and report
    `status: failed` with `reason: timed out after Ns` — never a clean empty result.
 

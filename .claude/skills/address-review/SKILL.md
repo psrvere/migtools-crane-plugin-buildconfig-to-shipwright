@@ -49,8 +49,10 @@ The user invoked this with: $ARGUMENTS
   skill first; the footer is appended after, verbatim. If the `unslop` skill is not
   available, offer to install it; if the user declines, use the text as drafted and say
   so in the summary.
-- Sub-agents run on Sonnet except the challenger, which runs on Opus. Pass `model` on
-  every Agent call.
+- Every Agent call passes `model`, and the ceiling is `opus`: triage and fix on Sonnet,
+  the challenger on Opus. An omitted model inherits the session's, which may sit above
+  Opus; that is a bug, not a default. The ceiling caps, it never raises: a stage that
+  ran on Sonnet stays on Sonnet.
 - A skipped stage says so in the summary. Never let a skipped step look clean.
 - When the skill loads, the harness replaces a dollar sign followed by a digit with the matching argument, so no snippet in this file may use awk fields or shell positional parameters; use `grep`, `sed` and named variables instead.
 

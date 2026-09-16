@@ -31,3 +31,5 @@ vendor/
 # Temporary files
 *.tmp
 *.log
+
+.gstack/
