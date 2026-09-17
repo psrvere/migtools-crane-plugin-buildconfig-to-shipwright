@@ -5,7 +5,7 @@ migration. [support-matrix.md](support-matrix.md) has the field-by-field detail,
 row here points into it. Every `W` number links to its entry in the
 [Warning reference](support-matrix.md#warning-reference).
 
-Last checked against `main` on 2026-09-16.
+Last checked against `main` on 2026-09-17.
 
 ## The short list
 
@@ -71,7 +71,23 @@ The last column says why, and names the warning.
 | `sourceStrategy.incremental: true` | The first BuildRun fails unless the output image already exists on the target. Run it once with `incremental=false`, or push the image by hand | An incremental build starts `FROM` the previous output image to reuse its artifacts. On a fresh target that image is not there yet. [W21](support-matrix.md#w21) |
 | `resources` (CPU and memory) | Shipwright puts resources on the BuildRun, not the Build. Apply the BuildRun template from the annotation | A Shipwright Build has no field for resource requirements. Only a BuildRun does, so the plugin writes one into an annotation for you to apply. [W48](support-matrix.md#w48) |
 | Output to a registry with no `pushSecret` | A ServiceAccount with push credentials, or `spec.output.pushSecret` on the Build | OpenShift pushed with the builder account's credentials. Shipwright needs them named on the Build, or on the ServiceAccount the BuildRun uses. [W36](support-matrix.md#w36), [W37](support-matrix.md#w37) |
-| A binary source, with or without `asFile` | Start each build with `shp build upload <build> <directory>`. With `asFile`, put the file in that directory under that name. `shp build upload` cannot take the BuildRun template from W48, so `spec.resources` does not reach a binary build | OpenShift took the input from `oc start-build` at each start. A Shipwright Local source is the same directory upload, but nothing feeds it on its own: a BuildRun started without the upload waits out the timeout and fails. [W67](support-matrix.md#w67), [W68](support-matrix.md#w68) |
+| A binary source, with or without `asFile` | Start each build with `shp build upload <build> <directory>`. With `asFile`, put the file in that directory under that name. `shp build upload` cannot take the BuildRun template from W48, so `spec.resources` does not reach a binary build | OpenShift took the input from `oc start-build` at each start. A Shipwright Local source is also a directory upload, but nothing feeds it on its own: a BuildRun started without the upload waits out the timeout and fails. `shp` also sends fewer files than `oc` did; see [What `shp build upload` leaves out](#what-shp-build-upload-leaves-out). [W67](support-matrix.md#w67), [W68](support-matrix.md#w68) |
+
+### What `shp build upload` leaves out
+
+`oc start-build --from-dir` sent every file in the directory except `.git/`. `shp build upload`
+sends less. Checked on a ROSA cluster with Builds for Red Hat OpenShift 1.9.0 on 2026-09-17,
+with `shp` built from `main` and from each open fix. Only the first two rows are in the W67
+warning, because only those will stay true; [ADR-0011](adr/0011-binary-upload-differences-warn-only-what-lasts.md)
+records why.
+
+| What `shp` does | Upstream status | What you do |
+|---|---|---|
+| Skips every file the directory's top-level `.gitignore` lists | By design, and there is no switch to turn it off ([SHIP-0021](https://github.com/shipwright-io/community/blob/main/ships/0021-local-source-upload.md), `shp build upload --help`). No request upstream to change it | Remove the entry from `.gitignore`, or upload a copy of the directory without it. A build output such as `target/app.jar` is the usual casualty |
+| Drops a symlink that points outside the directory. Once the symlink fix below merges, the upload fails instead | By design, for security ([maintainer review on cli#355](https://github.com/shipwright-io/cli/pull/355#discussion_r3110712038)) | Copy the file into the directory |
+| Drops files and directories whose names start with `.git`, such as `.github/`, `.gitignore` and `.gitattributes` | Bug: [cli#408](https://github.com/shipwright-io/cli/issues/408), fix in review in [cli#409](https://github.com/shipwright-io/cli/pull/409) | Until it merges, rename or copy what the build needs |
+| Drops symlinks inside the directory | Bug, fix in review in [cli#355](https://github.com/shipwright-io/cli/pull/355). No issue was filed | Until it merges, replace the symlink with a copy of its target |
+| Drops empty directories | Not reported, and not planned to be | Create the directory in the Dockerfile with `RUN mkdir` |
 
 ## Planned
 

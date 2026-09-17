@@ -821,7 +821,7 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		// --from-dir streamed a directory, --from-archive an archive OpenShift
 		// extracted, --from-repo a checkout; each became the build context, and
 		// --from-file placed one file in it under asFile. A Shipwright Local
-		// source is the same directory
+		// source is also a directory
 		// upload, driven by `shp build upload` instead of oc, so both forms
 		// convert to it. Nothing feeds a Local source on its own: a BuildRun
 		// started without the upload waits out the timeout and fails, so the
@@ -836,7 +836,10 @@ func (c *Converter) processSource(bc *buildv1.BuildConfig, b *shipwrightv1beta1.
 		if asFile := binary.AsFile; asFile != "" {
 			c.warnf("BuildConfig %s/%s has a binary source with asFile %q, so OpenShift placed the file streamed by oc start-build --from-file at that name in the build context. The Build has a Local source instead, which takes a directory: put the file in a directory as %q and start each build with 'shp build upload %s <directory>'. A BuildRun started any other way waits %s for the upload and then fails.", bc.Namespace, bc.Name, asFile, asFile, bc.Name, Timeout)
 		} else {
-			c.warnf("BuildConfig %s/%s has a binary source with no asFile, so OpenShift built whatever oc start-build --from-dir, --from-archive or --from-repo streamed in. The Build has a Local source instead, and nothing feeds it on its own: start each build with 'shp build upload %s <directory>' so that directory becomes the build context, the way --from-dir did. A BuildRun started any other way waits %s for the upload and then fails.", bc.Namespace, bc.Name, bc.Name, Timeout)
+			// The .gitignore and outside-symlink differences are the ones
+			// Shipwright keeps on purpose; the upload bugs that have a fix
+			// in review stay out of this text (ADR-0011).
+			c.warnf("BuildConfig %s/%s was a binary build: each build used the files sent by oc start-build --from-dir, --from-archive or --from-repo. The new Build gets its files the same way, but through shp: run 'shp build upload %s <directory>' for every build. A build started any other way waits %s for files and then fails. shp does not send everything oc did: it skips files listed in the directory's .gitignore, such as a target/app.jar you built locally, and symlinks that point outside the directory.", bc.Namespace, bc.Name, bc.Name, Timeout)
 		}
 	} else if len(images) > 0 {
 		if len(images) > 1 {
