@@ -1,0 +1,28 @@
+# A Docker build with a binary directory source and resource requests and
+# limits. The Build gets a Local source, which starts only through
+# 'shp build upload', and that command has no flag for step resources. The
+# plugin still writes the BuildRun template, and W71 replaces W48, which would
+# point at a template that cannot start this Build (BUILD-2477).
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: binary-resources-app
+  namespace: binary-test
+spec:
+  output:
+    to:
+      kind: DockerImage
+      name: registry.example.internal/binary-resources-app:1.0.0
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile

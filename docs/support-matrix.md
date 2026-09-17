@@ -43,7 +43,7 @@ The "What happens" column uses these words:
   you can check for them yourself.
 - **Skipped** and **Failed.** The whole BuildConfig is not converted. See the next section.
 
-Warnings are quoted in the [Warning reference](#warning-reference) at the end, keyed [W1](#w1) to [W68](#w68). Each number is an anchor: `#w12` jumps to [W12](#w12).
+Warnings are quoted in the [Warning reference](#warning-reference) at the end, keyed [W1](#w1) to [W71](#w71). Each number is an anchor: `#w12` jumps to [W12](#w12).
 In the quotes, `…` marks a value the plugin fills in, such as a BuildConfig name.
 
 ## What stops a BuildConfig from converting
@@ -199,7 +199,7 @@ Applies to `dockerStrategy.volumes[]` and `sourceStrategy.volumes[]`.
 
 | Field | What happens | Where it lands | What you do by hand | Warning |
 |---|---|---|---|---|
-| `spec.resources` (requests or limits) | Converted, with a warning. The Build cannot hold resources, so a BuildRun template is generated instead | the annotation `buildconfig-to-shipwright/buildrun-template`, holding a BuildRun with `stepResources` for the strategy's steps and the ServiceAccount | Review the template, then apply it to start a build. With `--default-build-strategy` the step names are unknown and `stepResources` is left out | A Build has no resources field. A BuildRun does. [W48](#w48), or [W47](#w47) with a custom strategy |
+| `spec.resources` (requests or limits) | Converted, with a warning. The Build cannot hold resources, so a BuildRun template is generated instead | the annotation `buildconfig-to-shipwright/buildrun-template`, holding a BuildRun with `stepResources` for the strategy's steps and the ServiceAccount | Review the template, then apply it to start a build. With `--default-build-strategy` the step names are unknown and `stepResources` is left out | A Build has no resources field. A BuildRun does. [W48](#w48), or [W47](#w47) with a custom strategy. With a binary source the template cannot start the Build, because `shp build upload` creates its own BuildRun and takes no step resources, so each build runs with the strategy's defaults. [W71](#w71) replaces W48 and W47 there |
 | `spec.postCommit` (script, command or args) | Dropped | | Add a test step after the BuildRun in a Tekton Pipeline. It runs after the push, so it cannot block a bad image | Shipwright has no step between build and push. [W59](#w59), and [W60](#w60) if both script and command are set |
 | `spec.runPolicy: Serial` (or unset) | Dropped. BuildRuns run concurrently | | Serialise runs in your pipeline if ordering matters | Shipwright has no build queue. [W43](#w43) |
 | `spec.runPolicy: SerialLatestOnly` | Dropped | | Serialise and cancel superseded runs in your pipeline | Shipwright has no build queue, and nothing cancels a superseded run. [W44](#w44) |
@@ -426,3 +426,4 @@ backticks, because a backtick-quoted string in a row is read as a live warning t
 | <a id="w66" name="w66"></a>W66 | `error parsing optional fields: …`, `error marshaling BuildConfig to JSON: …` or `error decoding BuildConfig: …` (the plugin returns this error and crane aborts the transform; nothing is recorded on the BuildConfig) |
 | <a id="w67" name="w67"></a>W67 | `BuildConfig …/… was a binary build: each build used the files sent by oc start-build --from-dir, --from-archive or --from-repo. The new Build gets its files the same way, but through shp: run 'shp build upload … <directory>' for every build. A build started any other way waits … for files and then fails. shp does not send everything oc did: it skips files listed in the directory's .gitignore, such as a target/app.jar you built locally, and symlinks that point outside the directory.` |
 | <a id="w68" name="w68"></a>W68 | `BuildConfig …/… has a binary source with asFile …, so OpenShift placed the file streamed by oc start-build --from-file at that name in the build context. The Build has a Local source instead, which takes a directory: put the file in a directory as … and start each build with 'shp build upload … <directory>'. A BuildRun started any other way waits … for the upload and then fails.` |
+| <a id="w71" name="w71"></a>W71 | `BuildConfig …/… sets resources (…), but the Build has a Local source, which starts only through 'shp build upload … <directory>'. shp build upload creates its own BuildRun and has no flag for step resources, so each build runs with the strategy's default step resources. The BuildRun template in annotation … keeps the requested values for reference; it cannot start this Build.` |

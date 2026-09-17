@@ -1312,6 +1312,16 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 			*spec.ServiceAccount, BuildRunTemplateAnnotation, bc.Namespace, bc.Name)
 	}
 
+	// A Local source starts only through `shp build upload`, which creates its
+	// own BuildRun and has no input for step resources (shp v0.20.0), so the
+	// template cannot start this Build. Say what the build runs with instead
+	// of pointing at the template (BUILD-2477, upstream shipwright-io/cli#415).
+	if b.Spec.Source != nil && b.Spec.Source.Type == shipwrightv1beta1.LocalType {
+		c.warnf("BuildConfig %s/%s sets resources (%s), but the Build has a Local source, which starts only through 'shp build upload %s <directory>'. shp build upload creates its own BuildRun and has no flag for step resources, so each build runs with the strategy's default step resources. The BuildRun template in annotation %s keeps the requested values for reference; it cannot start this Build.",
+			bc.Namespace, bc.Name, resourceSummary(res), b.Name, BuildRunTemplateAnnotation)
+		return nil
+	}
+
 	if len(stepNames) == 0 {
 		c.warnf("Build strategy %q is a custom mapping with unknown step names — stepResources were omitted from the BuildRun template in annotation %s. Add stepResources entries matching the strategy's step names to carry over the BuildConfig resource requirements (requests: %v, limits: %v).", b.Spec.Strategy.Name, BuildRunTemplateAnnotation, res.Requests, res.Limits)
 		return nil
@@ -1321,6 +1331,32 @@ func (c *Converter) processResources(bc *buildv1.BuildConfig, b *shipwrightv1bet
 	c.warnf("Resource requirements are not supported on Shipwright Build. Apply the BuildRun template from annotation %s (after review) or set stepResources on each BuildRun you create.", BuildRunTemplateAnnotation)
 
 	return nil
+}
+
+// resourceSummary renders requests and limits as "requests cpu=500m,
+// limits memory=2Gi", sorted by resource name so the text is stable.
+func resourceSummary(res corev1.ResourceRequirements) string {
+	var parts []string
+	for _, group := range []struct {
+		label string
+		list  corev1.ResourceList
+	}{{"requests", res.Requests}, {"limits", res.Limits}} {
+		if len(group.list) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(group.list))
+		for name := range group.list {
+			names = append(names, string(name))
+		}
+		slices.Sort(names)
+		values := make([]string, 0, len(names))
+		for _, name := range names {
+			q := group.list[corev1.ResourceName(name)]
+			values = append(values, name+"="+q.String())
+		}
+		parts = append(parts, group.label+" "+strings.Join(values, " "))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func toSingleValues(registries []string) []shipwrightv1beta1.SingleValue {

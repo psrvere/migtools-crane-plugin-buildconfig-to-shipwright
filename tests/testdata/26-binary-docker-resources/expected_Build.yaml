@@ -1,0 +1,46 @@
+apiVersion: shipwright.io/v1beta1
+kind: Build
+metadata:
+  annotations:
+    buildconfig-to-shipwright/buildrun-template: |
+      apiVersion: shipwright.io/v1beta1
+      kind: BuildRun
+      metadata:
+        name: binary-resources-app-buildrun
+        namespace: binary-test
+      spec:
+        build:
+          name: binary-resources-app
+        stepResources:
+        - name: build-and-push
+          resources:
+            limits:
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+    buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
+    crane.konveyor.io/conversion-warnings: |-
+      [binary-test/binary-resources-app] BuildConfig binary-test/binary-resources-app was a binary build: each build used the files sent by oc start-build --from-dir, --from-archive or --from-repo. The new Build gets its files the same way, but through shp: run 'shp build upload binary-resources-app <directory>' for every build. A build started any other way waits 10m0s for files and then fails. shp does not send everything oc did: it skips files listed in the directory's .gitignore, such as a target/app.jar you built locally, and symlinks that point outside the directory.
+      [binary-test/binary-resources-app] No explicit pushSecret found for DockerImage output. Set spec.output.pushSecret to a registry credential secret, or ensure the BuildRun ServiceAccount carries credentials for the target registry; otherwise the push will fail.
+      [binary-test/binary-resources-app] BuildConfig binary-resources-app uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
+      [binary-test/binary-resources-app] BuildConfig binary-test/binary-resources-app sets resources (requests cpu=500m memory=1Gi, limits memory=2Gi), but the Build has a Local source, which starts only through 'shp build upload binary-resources-app <directory>'. shp build upload creates its own BuildRun and has no flag for step resources, so each build runs with the strategy's default step resources. The BuildRun template in annotation buildconfig-to-shipwright/buildrun-template keeps the requested values for reference; it cannot start this Build.
+    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/binary-resources-app
+  name: binary-resources-app
+  namespace: binary-test
+spec:
+  output:
+    image: registry.example.internal/binary-resources-app:1.0.0
+  paramValues:
+    - configMapValue: null
+      name: dockerfile
+      secretValue: null
+      value: Dockerfile
+  source:
+    local:
+      name: local-copy
+      timeout: 10m0s
+    type: Local
+  strategy:
+    kind: ClusterBuildStrategy
+    name: buildah
