@@ -40,7 +40,7 @@ generated. The original BuildConfig is removed from the output. What to look at:
 
 | In the Build | Where it came from |
 |---|---|
-| `spec.source: {type: Local, local: {name: local-copy, timeout: 10m0s}}` | `source.binary`. A Local source is a directory upload, the same thing `--from-dir` did, and nothing feeds it until you run `shp build upload` |
+| `spec.source: {type: Local, local: {name: local-copy, timeout: 10m0s}}` | `source.binary`. A Local source is a directory upload, like `--from-dir`, and nothing feeds it until you run `shp build upload` |
 | `spec.strategy.name: buildah` | the Docker strategy type |
 | `spec.paramValues[runtime-stage-from]` | `dockerStrategy.from`; the strategy replaces the last `FROM` with it |
 | `spec.paramValues[dockerfile]: Dockerfile` | `dockerStrategy.dockerfilePath` |
@@ -58,7 +58,7 @@ The same text is in the `conversion-warnings` annotation and in the plugin log.
 
 | Warning | Meaning |
 |---|---|
-| `has a binary source with no asFile … start each build with 'shp build upload binary-app <directory>'` | a Local source waits for an upload. A BuildRun created any other way waits 10 minutes and fails |
+| `was a binary build … run 'shp build upload binary-app <directory>' for every build … shp does not send everything oc did` | a Local source waits for an upload. A BuildRun created any other way waits 10 minutes and fails. `shp` also skips what `.gitignore` lists and symlinks that point outside the directory, so check that `app.jar` is not ignored. [What `shp build upload` leaves out](../../known-limitations.md#what-shp-build-upload-leaves-out) has the full list |
 | `mounts ConfigMap 'cluster-ca-certs' to 'certs' during build …` | the file no longer reaches the build. The strategy has to declare a volume for it |
 | `mounts secret 'nexus' to 'nexusSecret' during build …` | same, for the Secret |
 | `No explicit pushSecret found for DockerImage output …` | OpenShift pushed with the builder account. Shipwright needs the credential named on the Build or on the BuildRun's ServiceAccount |

@@ -1173,8 +1173,9 @@ func TestConvertBinaryDirectorySource(t *testing.T) {
 		t.Errorf("expected Local source timeout %v, got %+v", Timeout, b.Spec.Source.Local)
 	}
 	ann := b.Annotations[ConversionWarningsAnnotation]
-	assertContainsAll(t, ann, "no asFile", "--from-dir", "shp build upload binary-archive-app <directory>",
-		fmt.Sprintf("waits %s", Timeout))
+	assertContainsAll(t, ann, "was a binary build", "--from-dir", "shp build upload binary-archive-app <directory>",
+		fmt.Sprintf("waits %s", Timeout), "skips files listed in the directory's .gitignore",
+		"symlinks that point outside the directory")
 	if strings.Contains(ann, "asFile \"") {
 		t.Errorf("directory form must not mention an asFile name, got %q", ann)
 	}
