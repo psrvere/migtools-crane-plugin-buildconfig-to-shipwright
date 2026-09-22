@@ -174,7 +174,7 @@ this table is only an index. They are restated at the top of the generated
 
 | # | Override | Why it exists |
 |---|---|---|
-| **O1** | Path remapping (`sub-agents/…` → `vendor/sub-agents/…`) | Our layout differs from upstream's |
+| **O1** | Path remapping (`sub-agents/…` → `vendor/sub-agents/…`), plus a check that the skill body you were handed is the current one | Our layout differs from upstream's; and in a worktree the Skill tool serves the main checkout's `SKILL.md` |
 | **O2** | Always interactive mode; skip `fullsend-check-output` | No harness, no `$FULLSEND_OUTPUT_DIR`, that binary is not installed |
 | **O3** | Report-only default; protected-path approve→comment cap | Replaces `post-review.sh`, which we do not have |
 | **O4** | Model mapping `claude-sonnet-4-6@default` → `sonnet` | Upstream uses Vertex model IDs |
@@ -188,9 +188,9 @@ this table is only an index. They are restated at the top of the generated
 | **O12** | `Co-authored-by: Claude` trailer on every review | Attribution |
 | **O13** | Prompts are written to `$RUN_DIR` and dispatched by path; raw replies kept there too | 300 KB packages; and O9's tuning signal is only checkable if the replies survive |
 | **O14** | Check each composed prompt before dispatch; normalise sub-agent replies | A `sed` range once dropped the whole diff from the challenger prompt, silently |
-| **O15** | The challenger downgrades on evidence, never to keep the set small | It once demoted the highest-impact finding on set-size grounds |
-| **O16** | After the challenger, cross-check against reviews already on the PR | Catches what all five dimensions missed, without anchoring their severities |
-| **O17** | A skill-load `safeguards` API error means move the orchestrator to another model | Seen twice on Opus 5 (1M); not a defect in this skill |
+| **O15** | The challenger downgrades on evidence — never to keep the set small, never on impact it already conceded, never because a file was not supplied | It once demoted the highest-impact finding on set-size grounds, and later demoted a true one for being unverifiable |
+| **O16** | After the challenger, cross-check against reviews already on the PR; a point on the same line is not covered unless it is the same failure | Catches what all five dimensions missed, without anchoring their severities |
+| **O17** | A skill-load `safeguards` API error is intermittent: retry once on the same model, then move the orchestrator to another one | Seen twice on Opus 5 (1M), then absent on two later runs on that same model; not a defect in this skill |
 
 ---
 
@@ -240,7 +240,12 @@ in `src/header.md` as a new override instead.
   **O13**), and the run prints the path. Read it when a finding looks wrong, and
   delete it when you are done — nothing cleans it up.
 - **A `safeguards flagged this message` error at skill load is not a bug here.**
-  Re-run the orchestrator on a different model; see override **O17**.
+  It comes and goes on the same model: retry once, and re-run the orchestrator on
+  a different model only if the retry dies the same way; see override **O17**.
+- **In a worktree, the Skill tool loads the main checkout's `SKILL.md`.** It
+  resolves its own base directory, so editing the skill on a branch and running
+  it from that worktree runs the old text. **O1** has the check: compare the
+  highest `### O<n>` heading you were given against `$SKILL_DIR/SKILL.md`.
 
 ---
 

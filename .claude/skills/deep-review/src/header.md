@@ -43,8 +43,29 @@ Resolve `$SKILL_DIR` once at the start:
 
 ```bash
 SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/deep-review"
+echo "$SKILL_DIR"
 ls "$SKILL_DIR/vendor/sub-agents/" || { echo "vendor/ missing — run bin/sync"; exit 1; }
 ```
+
+Shell state does not survive from one Bash call to the next here, so `$SKILL_DIR`
+is empty in every later command and a path built from it resolves to `/SKILL.md`
+and reads as an empty file rather than an error you would notice. That is why the
+block prints it: use the printed literal path from here on, the way O13 says to
+for `$RUN_DIR`.
+
+**Check that you were handed the current overrides.** The Skill tool resolves its
+own base directory, and inside a git worktree that is the main checkout rather
+than the worktree you are working in, so the body you were given can be several
+overrides out of date. Compare it with the file on disk, with the printed path
+written out in full:
+
+```bash
+grep -oE '^### O[0-9]+' <printed-skill-dir>/SKILL.md | tail -1
+```
+
+If that names a higher override number than the highest one in the text you were
+given, read `$SKILL_DIR/SKILL.md` in full and follow that instead, and say in the
+triage which file you followed.
 
 `vendor/agent-review.md` is the agent definition the orchestrator calls
 authoritative for prohibitions and the output schema. Read it before step 1 and
@@ -83,11 +104,14 @@ sensitive paths. That script does not exist here, so enforce it yourself:
 > finding itself: vendored step 7 renders no summary section.
 
 This is a hard rule, not a heuristic. It holds even with `--post` and even if
-every sub-agent returned clean.
+every sub-agent returned clean. It binds `approve` and nothing else: a protected
+path can never produce `approve`, and never by itself escalates to
+`request-changes`, but a critical or high finding from any other source still
+produces `request-changes` under vendored step 6f.
 
 **Deliberate divergence from upstream.** `vendor/agent-review.md` requires
 `request-changes` when a protected-path change is not justified; this override
-instead caps the verdict at `comment`. That is intentional: this skill has no
+instead caps that escalation at `comment`. That is intentional: this skill has no
 app identity here and posts as a human collaborator on someone else's PR, so the
 conservative direction is to flag and let a human decide, never to block. Keep
 the cap. If upstream's protected-path text changes, this paragraph is the thing
@@ -110,11 +134,12 @@ body exactly as the vendored step 4 describes. Do not look for them in the
 agent registry.
 
 **One exception to the table.** When documentation files are the majority of the
-changed files, dispatch `docs-currency` on `opus`. On PR #87, 10 of 13 changed
-files were docs, `docs-currency` ran on sonnet and returned one finding, and three
-separate doc-versus-code mismatches went unreported. Docs are the dimension this
-repo holds to the code in CI (`go test -tags documentation ./buildconfig`), so the
-call is worth paying for.
+changed files — **by file count, not by changed lines** — dispatch `docs-currency`
+on `opus`. On PR #87, 10 of 13 changed files were docs, `docs-currency` ran on
+sonnet and returned one finding, and three separate doc-versus-code mismatches went
+unreported. Docs are the dimension this repo holds to the code in CI
+(`go test -tags documentation ./buildconfig`), so the call is worth paying for. The
+two readings diverge often: on PR #23 docs were 3 of 5 files and 19 of 528 lines.
 
 The vendored constraint *"All sub-agents MUST be dispatched simultaneously —
 include all Agent calls in a single message"* still applies and matters: issue
@@ -198,6 +223,11 @@ verbatim block:
   belongs to `docs-currency`.
 - `crane-lib/convert/` is legacy and frozen for this effort. New conversion
   logic belongs in `buildconfig/`, not `convert/`.
+- **Nothing in this pipeline touches a cluster.** The plugin is offline by rule
+  (ADR-0001), and `crane apply` only writes YAML into `output/` — it holds no
+  Kubernetes client. An operator applies that directory afterwards. So a finding
+  about an emitted object overwriting something on the target is about what
+  happens when the output is applied, never about what the plugin or crane does.
 - **Jira, not GitHub issues.** Work is tracked as `BUILD-nnnn` in Jira, which is
   not reachable from here. A PR with no linked GitHub issue is the norm and not a
   gap: check that the title or body cites a `BUILD-` key and treat that as the
@@ -222,9 +252,19 @@ under the `documentation` build tag (`AGENTS.md`, "When a documentation test
 fails"). So re-derive every doc sentence the diff changes from the code condition
 it now describes, word for word: "`spec.resources` is set" and "`spec.resources`
 has requests or limits" are different claims about different inputs. And read the
-pages the diff does not touch that describe a step it changed —
-`docs/trigger-migration.md` and `docs/known-limitations.md` have no doc test
-holding them to the code, so nothing else will catch them.
+pages the diff does not touch that describe a step it changed — `README.md`,
+`docs/adr/*`, `docs/trigger-migration.md`, `docs/known-limitations.md` and
+`docs/volume-migration.md` have no doc test holding them to the code, so nothing
+else will catch them. `TestADRsAreWellFormed` checks a record's parts, never its
+claims.
+
+When the diff changes a fact about the world rather than about this code — a
+shipped ClusterBuildStrategy now declares a volume, the plugin now emits a third
+resource — grep every page under `docs/` **and the ADRs** for the old claim before
+deciding which pages are stale. On PR #23 the claim that needed retiring was in
+`docs/adr/0007`: "the shipped buildah and source-to-image strategies declare
+exactly one, for entitlements", the premise the whole change rests on. No
+dimension opened `docs/adr/` and nothing reported it.
 
 **`style-conventions` specifically:** its job here is to audit against
 `AGENTS.md` and the conventions actually visible in the surrounding code — not
@@ -401,6 +441,19 @@ whose complete contents the diff already holds. Then truncate the diff to the
 files the findings name, then to the hunks. Do not skip the ladder because the
 sub-agent could page the file itself.
 
+**Write commands this harness will actually run.** The shell guard refuses a
+single command that mixes a loop, a shell variable or a heredoc with the words
+`git` or `github`, and it refused two on the PR #80 run: a `sed` over
+`"${TMPDIR:-/tmp}/deep-review-80/diff.patch"`, and a
+`for f in ...; do cat "$f.md"; done` over the sub-agent definitions. So expand
+`$RUN_DIR` once, print it, and use that literal path in every later command;
+concatenate with repeated plain `cat` calls instead of a loop; and put any
+multi-step stage in a scratch script you run with `bash <file>`. Scan for hidden
+characters with a Python `unicodedata` pass rather than
+`grep '[^\x09\x0a\x20-\x7e]'` — no common grep reads `\x` escapes inside a
+bracket expression, so that pattern matches every line and the result tells you
+nothing.
+
 ### O14. Check what you composed, and normalise what comes back
 
 Three things went wrong between composing and consuming on PR #87, all of them
@@ -414,6 +467,13 @@ replies that needed fixing up before they could be merged.
   vendored part list names, `### Diff` included, exactly once. Build these files
   by appending whole files with `cat`, never with `sed` line ranges into a
   document whose headings you do not control.
+- Size alone does not prove a part is there. On PR #23 `awk '…' -- "$1"` — BSD
+  `awk` reads `--` as a filename — composed six prompts whose Part 1, the
+  sub-agent definition, was **empty**: 6 KB missing from a 262 KB file, well
+  inside a factor of two. What gave it away was that all six came out the same
+  size. So also grep each prompt for a string only that part contains — the
+  sub-agent's own name for Part 1, the guard flag for the last line — and check
+  the prompts differ from each other by their definitions' sizes.
 - Read PR fields with one `gh api repos/$REPO_FULL_NAME/pulls/$PR_NUMBER` call and
   take what you need from the result, rather than a `--jq` projection that has to
   predict every field you will later want.
@@ -443,6 +503,30 @@ from a sibling checkout — the way the same run argued its `_cluster` downgrade
 down from a claim crane's export filter disproves. Put that fact in
 `challenger_reason`.
 
+Two more moves are not that fact, and PR #23 used both.
+
+- **Impact re-argument.** Restating a consequence the finding already stated
+  ("the divergence lives entirely in a code comment", "a one-word count cannot
+  mislead anyone") says nothing the original got wrong. If the original conceded
+  it, it is already priced into the severity.
+- **Unverifiability.** PR #23's README finding lost a rung because README "was not
+  among the source files supplied at the PR head"; both of its claims were true at
+  the head commit. The context package carries changed files only, so any finding
+  about an unchanged file lands here. When a finding names a file the package does
+  not hold, fetch it —
+  `gh api repos/$REPO_FULL_NAME/contents/<path>?ref=$HEAD_SHA --jq .content | base64 --decode` —
+  and judge it. If you still cannot, keep the severity and say in
+  `challenger_reason` that the finding is unverified.
+
+Cite line numbers as they stand in the file. On PR #23 the challenger placed
+`getPullSecret` at "line 1782" of a 1617-line file, because it counted from the
+top of the composed prompt. Offsets into the prompt make every citation
+unauditable; re-derive them from the diff or from the file you fetched.
+
+Put this override's text into `$RUN_DIR/prompt-challenger.md`, immediately before
+the `REVIEW_SUB_AGENT_TRUE` flag on its last line. It governs what the challenger
+does, and the challenger cannot honour a rule it never reads.
+
 ### O16. Cross-check the verdict against reviews already on the PR
 
 O8 ignores reviews this skill did not write, so that nobody else's severities
@@ -464,6 +548,17 @@ After the challenger, in the orchestrator only:
    and say nothing.
 4. Never restate a point a finding already covers, and never move one of our
    severities because someone else rated it differently.
+5. **Covered means the same failure, not the same line.** When an outside point
+   lands where a finding of ours already sits but describes a different failure
+   mode, a different direction, or a different reachability, it is not covered.
+   Read both against the head and keep whichever the code permits. On PR #23 our
+   `info` finding and CodeRabbit's one pre-merge item both named
+   `bcStrategyVolumes`; ours said a mismatched strategy block causes a harmless
+   skip, theirs said it lets the injected CA bundle replace a user's own volume —
+   and the code permits theirs. The run called it covered, changed nothing, and
+   published the harmless reading. Correcting a finding from the code is moving on
+   evidence, which rule 4 does not forbid; what it forbids is moving because of
+   someone else's rating.
 
 With nothing else on the PR this step produces nothing and needs no line in the
 report.
@@ -476,9 +571,12 @@ message ... [reasoning_extraction]` (request IDs `req_011CfJANXRuNbyx83Arv744o`
 and `req_011CfJAQHFvRpTe5tRrjdKkZ`). The third run, same skill text, orchestrator
 on another model, finished normally and no sub-agent was flagged.
 
-It is an API-side failure on a long skill body, not a defect here, and retrying on
-the same model does not clear it. Move the orchestrator to another model. The O4
-mapping for the sub-agents is unaffected: those are separate calls.
+It is an API-side failure on a long skill body, not a defect here, and it is
+intermittent rather than a property of the model: later the same day two further
+runs loaded the same skill text with the orchestrator back on Opus 5 (1M context)
+and finished normally. Retry once on the same model; if it dies the same way, move
+the orchestrator to another one. The O4 mapping for the sub-agents is unaffected:
+those are separate calls.
 
 ---
 
