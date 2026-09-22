@@ -90,9 +90,9 @@ comes from each sub-agent's own frontmatter.
 | `security` | **opus** | auth, permissions, secrets, data handling, config touched | Vulnerabilities, access control, data exposure, injection, privilege escalation |
 | `intent-coherence` | sonnet | linked issue exists, or change is non-trivial | Architectural fit, intent alignment, PR scope, scope authorization |
 | `style-conventions` | sonnet | always | Repo conventions — pointed at this repo's `AGENTS.md`, **not** generic Go opinions |
-| `docs-currency` | sonnet | repo has docs | Documentation staleness (runs the `docs-review` skill inline) |
+| `docs-currency` | sonnet, **opus** when docs are most of the changed files | repo has docs | Documentation staleness (runs the `docs-review` skill inline) |
 | `cross-repo-contracts` | sonnet | `go.mod`/`go.sum`/crane-lib boundary changes | Contract breakage affecting other repos |
-| `security-triage` | haiku | large PRs, pre-pass | Ranks which files are security-critical so context budget goes there first |
+| `security-triage` | haiku | large PRs, pre-pass — so in practice, never on a PR in this repo | Ranks which files are security-critical so context budget goes there first |
 | `challenger` | **opus** | always, **after** the others | False-positive removal, cross-dimension dedup, severity calibration |
 
 Every sub-agent has an explicit `Own:` / `Do not own:` boundary. That is what
@@ -125,7 +125,7 @@ The single most important thing to understand:
 ├── README.md            ← you are here
 ├── SKILL.md             ← GENERATED — do not edit. This is what Claude loads.
 ├── src/
-│   └── header.md        ← OURS. Frontmatter + local overrides O1–O10.
+│   └── header.md        ← OURS. Frontmatter + local overrides O1–O17.
 ├── bin/
 │   └── sync             ← verify / check / update / build
 └── vendor/              ← THEIRS. Byte-identical to upstream @ ee30be60.
@@ -168,7 +168,7 @@ No fullsend installation, no sandbox, no cloud credentials, no Vertex AI.
 
 ## 6. Local overrides
 
-All nine live in [`src/header.md`](src/header.md) — that file is authoritative;
+All seventeen live in [`src/header.md`](src/header.md) — that file is authoritative;
 this table is only an index. They are restated at the top of the generated
 `SKILL.md`, where they explicitly supersede the vendored text below them.
 
@@ -184,6 +184,13 @@ this table is only an index. They are restated at the top of the generated
 | **O8** | Fetch prior review inline via `gh`, accepting only a review carrying our head-SHA marker | Replaces `pre-fetch-prior-review.sh` *and* its provenance check |
 | **O9** | Report format, always printing challenger removals | Tuning signal |
 | **O10** | `$REVIEW_FINDING_SEVERITY_THRESHOLD` = `info` — suppress nothing | Upstream requires it; no harness to supply it |
+| **O11** | Run the review body through `unslop` before showing or posting it | It is prose a person reads |
+| **O12** | `Co-authored-by: Claude` trailer on every review | Attribution |
+| **O13** | Prompts are written to `$RUN_DIR` and dispatched by path; raw replies kept there too | 300 KB packages; and O9's tuning signal is only checkable if the replies survive |
+| **O14** | Check each composed prompt before dispatch; normalise sub-agent replies | A `sed` range once dropped the whole diff from the challenger prompt, silently |
+| **O15** | The challenger downgrades on evidence, never to keep the set small | It once demoted the highest-impact finding on set-size grounds |
+| **O16** | After the challenger, cross-check against reviews already on the PR | Catches what all five dimensions missed, without anchoring their severities |
+| **O17** | A skill-load `safeguards` API error means move the orchestrator to another model | Seen twice on Opus 5 (1M); not a defect in this skill |
 
 ---
 
@@ -203,7 +210,7 @@ bin/sync --update [--ref <sha>]      # diff upstream's changes, rewrite vendor/,
 `--update` never touches `src/header.md`. Run `bin/sync --build` after editing
 `src/header.md` yourself.
 
-**After any update, re-read the O1–O10 overrides.** They reference upstream
+**After any update, re-read the O1–O17 overrides.** They reference upstream
 concepts by name — step numbers, `$FULLSEND_OUTPUT_DIR`, `post-review.sh`,
 sub-agent filenames. If upstream renames a step or drops a sub-agent, an
 override can silently stop applying.
@@ -228,6 +235,12 @@ in `src/header.md` as a new override instead.
   holds base-branch code. Do not "correct" a finding by checking your checkout.
 - **This reviews PRs, not branches.** There is no local-diff mode; open the PR
   first, then review it.
+- **The run leaves a directory behind.** Prompts, raw sub-agent replies and the
+  pre-challenger findings go to `${TMPDIR:-/tmp}/deep-review-<pr>` (override
+  **O13**), and the run prints the path. Read it when a finding looks wrong, and
+  delete it when you are done — nothing cleans it up.
+- **A `safeguards flagged this message` error at skill load is not a bug here.**
+  Re-run the orchestrator on a different model; see override **O17**.
 
 ---
 
