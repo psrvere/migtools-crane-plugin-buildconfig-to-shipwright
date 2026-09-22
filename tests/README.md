@@ -35,7 +35,7 @@ tests/
 │   └── validation.go       # compares generated resources with the golden files
 ├── e2e/
 │   ├── e2e_suite_test.go   # Ginkgo setup
-│   └── conversion_test.go  # DescribeTable, one Entry per testdata directory (25 today)
+│   └── conversion_test.go  # DescribeTable, one Entry per testdata directory (27 today)
 ├── testdata/
 │   ├── 01-datagrid-hotrod/         # one directory per case
 │   │   ├── buildconfig.yaml        # the input
@@ -114,9 +114,9 @@ runs it on every pull request, and `../hack/README.md` explains the setup.
 ## Test Results
 
 Every directory under `tests/testdata/NN-*` is one Entry, and every Entry runs; nothing is
-skipped. 25 cases as of this file, in three groups by what the directory holds.
+skipped. 27 cases as of this file, in three groups by what the directory holds.
 
-**Golden comparison (20 cases).** The generated resources must match the
+**Golden comparison (22 cases).** The generated resources must match the
 `expected_<Kind>.yaml` files after YAML normalization:
 
 - ✅ 01-datagrid-hotrod — S2I with triggers
@@ -139,6 +139,8 @@ skipped. 25 cases as of this file, in three groups by what the directory holds.
 - ✅ 11-s2i-with-volumes — S2I with binary directory source and volumes
 - ✅ 24-binary-docker-certs — Docker with binary directory source, source configMaps and secrets
 - ✅ 25-binary-asfile — Docker with a single-file binary source (asFile)
+- ✅ 26-binary-docker-resources — Docker with binary directory source and resources
+- ✅ 27-s2i-forbidden-env — S2I with env names Shipwright forbids
 
 **Passthrough with outcome annotations (3 cases).** No Build is generated; the
 BuildConfig comes back with the annotations in `expected_annotations.json`:

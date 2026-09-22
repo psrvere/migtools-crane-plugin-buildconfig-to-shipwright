@@ -354,6 +354,70 @@ func envNames(env []corev1.EnvVar) string {
 	return strings.Join(names, ", ")
 }
 
+// forbiddenEnvVarPrefixes and forbiddenEnvVarNames mirror
+// defaultForbiddenEnvVarNames in shipwright-io/build v0.21.0
+// (pkg/config/config.go), the blocklist that package installs through
+// pkg/env.SetForbiddenEnvVars when the controller starts. A Build whose
+// spec.env carries a covered name is left unregistered with the reason
+// SpecEnvNameForbidden by pkg/validate/envvars.go, and pkg/env.MergeEnvVars
+// refuses it a second time when the TaskRun is generated. Neither exists in
+// v0.19.0.
+//
+// The exact names are kept even though LD_* covers the five LD_ entries, so
+// the list can be diffed against the upstream one on a version bump.
+var (
+	forbiddenEnvVarPrefixes = []string{"LD_", "BASH_FUNC_"}
+	forbiddenEnvVarNames    = map[string]bool{
+		"LD_PRELOAD":      true,
+		"LD_LIBRARY_PATH": true,
+		"LD_AUDIT":        true,
+		"LD_DEBUG":        true,
+		"LD_PROFILE":      true,
+		"BASH_ENV":        true,
+		"ENV":             true,
+		"CDPATH":          true,
+		"PYTHONSTARTUP":   true,
+		"PERL5OPT":        true,
+		"PERLLIB":         true,
+		"PERL5LIB":        true,
+		"RUBYOPT":         true,
+		"NODE_OPTIONS":    true,
+	}
+)
+
+// isForbiddenEnvVar reports whether Shipwright's default blocklist covers
+// name, matching the upstream rule: an entry ending in '*' is a prefix.
+func isForbiddenEnvVar(name string) bool {
+	if forbiddenEnvVarNames[name] {
+		return true
+	}
+	for _, prefix := range forbiddenEnvVarPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// warnForbiddenEnv records one warning per strategy env entry whose name the
+// blocklist covers. field is the BuildConfig path the entries came from,
+// "dockerStrategy.env" or "sourceStrategy.env".
+//
+// The entry stays in spec.env. The blocklist is a controller default, not a
+// schema rule: an administrator replaces it through FORBIDDEN_ENV_VAR_NAMES,
+// and the plugin cannot read the target to find out (ADR-0001), so dropping
+// the entry would throw away a value that is legal on some clusters
+// (ADR-0015). The value never reaches the warning, only the name.
+func (c *Converter) warnForbiddenEnv(bc *buildv1.BuildConfig, field string, env []corev1.EnvVar) {
+	for _, e := range env {
+		if !isForbiddenEnvVar(e.Name) {
+			continue
+		}
+		c.warnf("BuildConfig %s/%s sets %s %s, a name Shipwright forbids for security reasons. From Shipwright v0.21.0 a Build carrying it stays unregistered with the reason SpecEnvNameForbidden, so no BuildRun of it ever starts. The entry is kept in spec.env so you can see what to act on: take it off the Build and get the value in another way, or have a cluster administrator allow the name through the build controller's FORBIDDEN_ENV_VAR_NAMES setting.",
+			bc.Namespace, bc.Name, field, e.Name)
+	}
+}
+
 func validBuildArgName(name string) bool {
 	if name == "" {
 		return false
@@ -466,6 +530,7 @@ func (c *Converter) processDockerStrategy(bc *buildv1.BuildConfig, b *shipwright
 	if len(ds.Env) > 0 {
 		c.warnf("BuildConfig %s/%s sets dockerStrategy.env %s. OpenShift added these as an ENV instruction after each FROM in the Dockerfile, but on Shipwright they only reach the build container, so RUN steps and the output image do not see them. Add ENV <name>=<value> after each FROM in the Dockerfile, or see %s",
 			bc.Namespace, bc.Name, envNames(ds.Env), DockerEnvRFE)
+		c.warnForbiddenEnv(bc, "dockerStrategy.env", ds.Env)
 	}
 
 	// ForcePull
@@ -627,6 +692,7 @@ func (c *Converter) processSourceStrategy(bc *buildv1.BuildConfig, b *shipwright
 	if len(ss.Env) > 0 {
 		c.warnf("BuildConfig %s/%s sets sourceStrategy.env %s. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see %s",
 			bc.Namespace, bc.Name, envNames(ss.Env), SourceEnvRFE)
+		c.warnForbiddenEnv(bc, "sourceStrategy.env", ss.Env)
 	}
 
 	// Scripts → scripts-url param

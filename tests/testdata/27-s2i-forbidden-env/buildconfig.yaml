@@ -1,0 +1,35 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: nodejs-forbidden-env
+  namespace: sample-project
+spec:
+  runPolicy: Parallel
+  source:
+    type: Git
+    git:
+      uri: 'https://example.com/git/nodejs-app'
+  strategy:
+    type: Source
+    sourceStrategy:
+      from:
+        kind: DockerImage
+        name: registry.example.com/builder/nodejs:20
+      env:
+        - name: NODE_OPTIONS
+          value: '--max-old-space-size=4096'
+        - name: LD_LIBRARY_PATH
+          value: /opt/app-root/lib
+        - name: APP_MODE
+          value: production
+  output:
+    to:
+      kind: DockerImage
+      name: 'registry.example.com/team/nodejs-app:latest'
+    pushSecret:
+      name: registry-push
+  resources: {}
+  postCommit: {}
+  nodeSelector: null
+status:
+  lastVersion: 0
