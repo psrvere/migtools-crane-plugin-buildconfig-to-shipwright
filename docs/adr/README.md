@@ -23,6 +23,7 @@ here refines it or departs from it, and says which.
 | [0011](0011-binary-upload-differences-warn-only-what-lasts.md) | The binary-build warning names only the upload differences that will last; upstream bugs with a fix in review go in known-limitations |
 | [0012](0012-buildrun-template-exists-when-it-names-an-account.md) | The BuildRun template exists whenever it names a ServiceAccount |
 | [0013](0013-crane-carries-the-account-the-plugin-points-at-it.md) | crane carries a named ServiceAccount and its RBAC; the plugin only points at it |
+| [0014](0014-go-toolchain-parity-with-mta-crane.md) | This module takes Go 1.26 before mta-crane does, and the mta-crane owner decides whether that stands |
 
 A test checks that every file here has those parts, that the index and the files agree, and
 that no link here points at a file that is missing. Nothing checks that a new decision gets a
