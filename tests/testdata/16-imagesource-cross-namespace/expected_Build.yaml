@@ -23,9 +23,7 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000//inputimage:latest
   paramValues:
-  - configMapValue: null
-    name: runtime-stage-from
-    secretValue: null
+  - name: runtime-stage-from
     value: image-registry.openshift-image-registry.svc:5000/openshift/ruby:3.3-ubi8
   source: null
   strategy:

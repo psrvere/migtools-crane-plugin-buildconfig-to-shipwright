@@ -21,9 +21,7 @@ spec:
   output:
     image: quay.io/example/buildconfig-test/ruby-hello-world:latest
   paramValues:
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   source:
     git:

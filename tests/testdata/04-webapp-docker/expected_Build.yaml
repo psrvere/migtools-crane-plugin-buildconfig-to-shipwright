@@ -17,18 +17,12 @@ spec:
     image: quay.io/example/webapp:latest
     pushSecret: quay-push-secret
   paramValues:
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile.prod
   - name: build-args
     values:
-    - configMapValue: null
-      secretValue: null
-      value: GO_VERSION=1.21
-    - configMapValue: null
-      secretValue: null
-      value: BASE_IMAGE=registry.access.redhat.com/ubi8/ubi-minimal:latest
+    - value: GO_VERSION=1.21
+    - value: BASE_IMAGE=registry.access.redhat.com/ubi8/ubi-minimal:latest
   source:
     contextDir: docker
     git:

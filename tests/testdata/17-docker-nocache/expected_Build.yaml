@@ -19,17 +19,11 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000/buildconfig-demo/nocache-test:latest
   paramValues:
-  - configMapValue: null
-    name: no-cache
-    secretValue: null
+  - name: no-cache
     value: "true"
-  - configMapValue: null
-    name: pull
-    secretValue: null
+  - name: pull
     value: always
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   source:
     contextDir: .

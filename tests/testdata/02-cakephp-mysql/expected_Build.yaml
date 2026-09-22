@@ -27,9 +27,7 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000//cakephp-mysql-persistent:latest
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: quay.io/openshifttest/php_mtc:7.3-ubi8
   source:
     git:

@@ -14,9 +14,7 @@ spec:
   output:
     image: registry.example.internal/binary-file-app:1.0.0
   paramValues:
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   source:
     local:

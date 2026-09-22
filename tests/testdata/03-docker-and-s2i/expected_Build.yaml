@@ -20,9 +20,7 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000/buildconfig-test/ruby-hello-world:latest
   paramValues:
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   source:
     git:
@@ -61,9 +59,7 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000/buildconfig-test/s2i-ruby-app:latest
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: quay.io/centos7/ruby-27-centos7:latest
   source:
     git:

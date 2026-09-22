@@ -43,9 +43,7 @@ spec:
     labels:
       user-specified-label: arbitrary-value
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: quay.io/redhat-developer/test-build-simples2i:1.2
   source:
     git:

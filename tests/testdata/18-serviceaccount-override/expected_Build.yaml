@@ -32,9 +32,7 @@ spec:
     image: quay.io/example/buildconfig-demo/custom-sa-build:latest
     pushSecret: registry-push-secret
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: quay.io/example/buildconfig-demo/nodejs:latest
   source:
     git:

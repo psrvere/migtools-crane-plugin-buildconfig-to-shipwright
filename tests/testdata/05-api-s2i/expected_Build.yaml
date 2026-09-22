@@ -24,21 +24,13 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000/bc-test-05-api-s2i/api-service:latest
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: image-registry.openshift-image-registry.svc:5000/openshift/nodejs:16-ubi8
-  - configMapValue: null
-    name: scripts-url
-    secretValue: null
+  - name: scripts-url
     value: https://github.com/example/s2i-scripts
-  - configMapValue: null
-    name: incremental
-    secretValue: null
+  - name: incremental
     value: "true"
-  - configMapValue: null
-    name: pull-policy
-    secretValue: null
+  - name: pull-policy
     value: always
   source:
     contextDir: src

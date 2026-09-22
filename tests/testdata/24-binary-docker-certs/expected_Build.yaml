@@ -25,13 +25,9 @@ spec:
   output:
     image: registry.example.internal/binary-app:1.2.2
   paramValues:
-  - configMapValue: null
-    name: runtime-stage-from
-    secretValue: null
+  - name: runtime-stage-from
     value: registry.example.internal/base-images/java/openjdk-21:latest
-  - configMapValue: null
-    name: dockerfile
-    secretValue: null
+  - name: dockerfile
     value: Dockerfile
   retention:
     failedLimit: 2

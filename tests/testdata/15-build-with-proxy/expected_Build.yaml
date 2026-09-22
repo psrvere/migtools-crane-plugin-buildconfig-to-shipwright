@@ -32,9 +32,7 @@ spec:
   output:
     image: image-registry.openshift-image-registry.svc:5000//sample-build:latest
   paramValues:
-  - configMapValue: null
-    name: builder-image
-    secretValue: null
+  - name: builder-image
     value: quay.io/redhat-developer/test-build-simples2i:1.2
   source:
     git:
