@@ -1,7 +1,8 @@
 # ADR-0010: The default strategy names target the Builds for Red Hat OpenShift catalog
 
 Status: accepted. Decided 2026-09-10 (BUILD-2469). Verified against strategy-catalog cb2432c
-and Shipwright v0.19.0.
+and Shipwright v0.19.0, and the upstream side re-read against Shipwright v0.21.0 on
+2026-09-22 (BUILD-2334).
 Enhancement proposal: assumed there, never stated.
 
 ## Context
@@ -11,7 +12,7 @@ names in [strategy-catalog](https://github.com/redhat-openshift-builds/strategy-
 the Builds for Red Hat OpenShift operator installs. Upstream Shipwright's sample strategies use
 neither: its buildah strategies are `buildah-shipwright-managed-push`,
 `buildah-strategy-managed-push` and `multiarch-native-buildah`, and it has no `buildah`. A user
-running the plugin against upstream Shipwright v0.19.0 therefore gets a Build that Shipwright
+running the plugin against upstream Shipwright therefore gets a Build that Shipwright
 refuses to register, and nothing in the documentation told them which Shipwright the defaults
 assumed.
 
@@ -67,6 +68,11 @@ portability flag, and the documentation does not offer it as one.
 - The parameter tables above are a point-in-time reading of two repositories. They drift when
   either catalog moves. The cluster E2E's registered check is still the only real drift signal
   (ADR-0004).
+- Re-read for BUILD-2334, when the module moved to Shipwright v0.21.0. Upstream's sample
+  `source-to-image` strategy is byte-identical to the v0.19.0 one and still declares
+  `builder-image` alone, and upstream still ships no strategy called `buildah`, so both
+  tables above hold at v0.21.0 and the decision is unchanged. The strategy-catalog side was
+  not re-read; it still stands as of cb2432c.
 - Supporting upstream properly is a different piece of work: a parameter set the converter
   trims per target, or strategies contributed upstream. Neither is in scope here, and neither
   is bought by renaming a strategy.
