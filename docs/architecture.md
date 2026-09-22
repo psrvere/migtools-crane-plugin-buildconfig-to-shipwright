@@ -211,6 +211,18 @@ The annotations the plugin writes, and where:
 | `buildconfig-to-shipwright/original-triggers` | Build | `spec.triggers` is not empty |
 | `buildconfig-to-shipwright/inline-dockerfile-configmap` | Build | inline Dockerfile on a Docker strategy |
 
+The emitted YAML changed shape once, with the move to Shipwright v0.21.0 (BUILD-2334).
+Three JSON tags on the `SingleValue` type gained `omitempty`: `value`, `configMapValue` and
+`secretValue`. A Build written by an earlier version of this plugin carried
+`configMapValue: null` and `secretValue: null` under every `paramValues` entry, and
+`value: null` on an entry whose value came from a ConfigMap or Secret reference instead of
+a literal. None of those lines is written now. Nothing about the Build itself moved: all
+three fields are pointers, so only a nil was ever omitted, and anything that parses the
+YAML or unmarshals it into the Shipwright types reads the same object. A consumer that
+diffs generated Build YAML literally is the one that sees a difference. Every golden in
+this repository was regenerated with the bump; none of them held a `value: null`, because
+no fixture uses a ConfigMap or Secret build arg.
+
 ## The files
 
 Each file carries a label that says how a change to it should be reviewed.

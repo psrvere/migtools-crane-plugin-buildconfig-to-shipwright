@@ -45,7 +45,6 @@ What to look at:
 | annotation `conversion-outcome: converted-with-warnings` | something was dropped or needs review; the warnings say what |
 | annotation `original-triggers` | the `ConfigChange` trigger, kept for the day triggers exist in Shipwright |
 
-
 ## The warnings
 
 The same text is in the `conversion-warnings` annotation and in the plugin log.
