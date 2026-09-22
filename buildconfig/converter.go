@@ -1127,8 +1127,16 @@ func (c *Converter) processOutputImageLabels(bc *buildv1.BuildConfig, b *shipwri
 	}
 	labels := make(map[string]string, len(bc.Spec.Output.ImageLabels))
 	for _, il := range bc.Spec.Output.ImageLabels {
+		// Both cases come from the same CEL rule on the shared Image type,
+		// self.all(k, k != '' && !k.contains('=')), which v0.21.0 ships in the
+		// Build CRD. The API server rejects the whole Build at apply time, so a
+		// label that trips it is dropped rather than carried (ADR-0015).
 		if il.Name == "" {
 			c.warnf("%s", "Skipping output imageLabel with empty name")
+			continue
+		}
+		if strings.Contains(il.Name, "=") {
+			c.warnf("Skipping output imageLabel %q: a Shipwright Build rejects a label key containing '='", il.Name)
 			continue
 		}
 		if existing, ok := labels[il.Name]; ok && existing != il.Value {

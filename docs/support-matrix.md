@@ -43,7 +43,7 @@ The "What happens" column uses these words:
   you can check for them yourself.
 - **Skipped** and **Failed.** The whole BuildConfig is not converted. See the next section.
 
-Warnings are quoted in the [Warning reference](#warning-reference) at the end, keyed [W1](#w1) to [W75](#w75). Each number is an anchor: `#w12` jumps to [W12](#w12).
+Warnings are quoted in the [Warning reference](#warning-reference) at the end, keyed [W1](#w1) to [W76](#w76). Each number is an anchor: `#w12` jumps to [W12](#w12).
 In the quotes, `…` marks a value the plugin fills in, such as a BuildConfig name.
 
 ## What stops a BuildConfig from converting
@@ -191,6 +191,7 @@ Applies to `dockerStrategy.volumes[]` and `sourceStrategy.volumes[]`.
 | `output.to` of kind `ImageStreamTag` whose resolved image is not on the internal registry | Converted, with a warning. The ImageStream on the source cluster will no longer update | `spec.output.image` | Repoint any Deployment or DeploymentConfig that watched the ImageStream | The ImageStream on the source cluster stops updating. [W35](#w35) |
 | no `output.pushSecret` | Converted, with a warning | | Internal registry: give the BuildRun a ServiceAccount with push access. External registry: set `spec.output.pushSecret` to a registry credential | Shipwright needs push credentials named on the Build or on its ServiceAccount. [W36](#w36) for ImageStreamTag, [W37](#w37) for anything else |
 | `output.imageLabels[]` with an empty name | Dropped | | Name it | An image label needs a name. [W38](#w38) |
+| `output.imageLabels[]` with `=` in the name | Dropped | | Rename the label, or move the part after the `=` into the value | From Shipwright v0.21.0 the Build CRD carries a CEL rule on `spec.output.labels`, so the API server rejects the whole Build over one such key. [W76](#w76) |
 | `output.imageLabels[]` with a duplicate name | Converted, with a warning. The last value wins | `spec.output.labels` | Remove the duplicate | Label names must be unique. The last value wins. [W39](#w39) |
 | `output.to` of kind `ImageStreamTag` with a matching `--imagestream-mapping` | Converted | `spec.output.image`, after `--registry-mapping` | Nothing | none |
 | `output.to` of any other kind, including `DockerImage` and `ImageStreamImage` | Converted. The name is copied as written. No mapping flag is applied and there is no warning | `spec.output.image` | Check the registry in the name is reachable from the target | none |
@@ -435,3 +436,4 @@ backticks, because a backtick-quoted string in a row is read as a live warning t
 | <a id="w73" name="w73"></a>W73 | W71, followed by ` Pass the account the template names on the upload instead: shp build upload … <directory> --sa-name …. An upload that names no account runs as the namespace pipeline account, and a pull secret carried by … is not used.` when the template names an account |
 | <a id="w74" name="w74"></a>W74 | W71, followed by ` shp build upload has no flag for step resources, so each build runs with the strategy's default step resources. The resources set on the BuildConfig (…) are recorded here, and in the template only when the strategy's step names are known.` when the BuildConfig set resources |
 | <a id="w75" name="w75"></a>W75 | `BuildConfig …/… sets … …, a name Shipwright forbids for security reasons. From Shipwright v0.21.0 a Build carrying it stays unregistered with the reason SpecEnvNameForbidden, so no BuildRun of it ever starts. The entry is kept in spec.env so you can see what to act on: take it off the Build and get the value in another way, or have a cluster administrator allow the name through the build controller's FORBIDDEN_ENV_VAR_NAMES setting.` |
+| <a id="w76" name="w76"></a>W76 | `Skipping output imageLabel …: a Shipwright Build rejects a label key containing '='` |

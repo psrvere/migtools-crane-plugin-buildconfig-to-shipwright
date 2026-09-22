@@ -1684,6 +1684,24 @@ func TestConvertOutputImageLabels(t *testing.T) {
 			wantLabels: nil,
 		},
 		{
+			// BUILD-2334: the CEL rule v0.21.0 puts on spec.output.labels
+			// rejects a key holding '=', and the API server applies it to the
+			// whole Build, so the label is dropped like an unnamed one.
+			name: "label with = in the name is skipped",
+			imageLabels: []interface{}{
+				map[string]interface{}{"name": "vendor=acme", "value": "ignored"},
+				map[string]interface{}{"name": "vendor", "value": "Acme"},
+			},
+			wantLabels: map[string]string{"vendor": "Acme"},
+		},
+		{
+			name: "= in a label value is kept",
+			imageLabels: []interface{}{
+				map[string]interface{}{"name": "config", "value": "mode=fast"},
+			},
+			wantLabels: map[string]string{"config": "mode=fast"},
+		},
+		{
 			name:        "no imageLabels leaves output labels unset",
 			imageLabels: nil,
 			wantLabels:  nil,
@@ -1737,6 +1755,32 @@ func TestConvertOutputImageLabels(t *testing.T) {
 				t.Errorf("output labels = %#v, want %#v", b.Spec.Output.Labels, tt.wantLabels)
 			}
 		})
+	}
+}
+
+// BUILD-2334: a label dropped for the CEL rule says which one it was, so the
+// operator can rename it instead of wondering where it went.
+func TestConvertOutputImageLabelWithEqualsWarns(t *testing.T) {
+	spec := `{
+		"runPolicy": "Parallel",
+		"source": {"type": "Git", "git": {"uri": "https://example.com/app.git"}},
+		"strategy": {"type": "Docker", "dockerStrategy": {}},
+		"output": {
+			"to": {"kind": "DockerImage", "name": "registry.example.com/team/app:latest"},
+			"pushSecret": {"name": "push"},
+			"imageLabels": [{"name": "vendor=acme", "value": "ignored"}]
+		}
+	}`
+	b, outcome, warns := convertOutputSpec(t, spec, PluginOptionalFields{})
+
+	if n := countContaining(warns, `Skipping output imageLabel "vendor=acme"`); n != 1 {
+		t.Fatalf("warnings naming the label = %d, want 1 (%v)", n, warns)
+	}
+	if b.Spec.Output.Labels != nil {
+		t.Errorf("output labels = %#v, want none", b.Spec.Output.Labels)
+	}
+	if outcome.State != OutcomeConvertedWithWarnings {
+		t.Errorf("outcome = %s, want %s", outcome.State, OutcomeConvertedWithWarnings)
 	}
 }
 
