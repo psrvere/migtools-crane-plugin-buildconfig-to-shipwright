@@ -33,6 +33,15 @@ SKIP_CLUSTER_CREATE="${SKIP_CLUSTER_CREATE:-false}"
 log() { echo "==> $*"; }
 error() { echo "ERROR: $*" >&2; exit 1; }
 
+# Both version variables end up inside a release download URL. The flag parser
+# only rejects a leading dash, so a value holding a slash or ".." would fetch
+# from a different repository path. Check the shape before it gets there.
+validate_version() {
+    local name="$1" value="$2"
+    [[ "$value" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]] \
+        || error "$name must look like v1.2.3 (got: $value)"
+}
+
 show_help() {
     sed -n '/^# Usage:/,/^$/p' "$0" | sed 's/^# \?//'
     exit 0
@@ -159,6 +168,7 @@ install_tekton() {
 
     # Pin to tested Tekton release (can be overridden via TEKTON_VERSION env var)
     local TEKTON_VERSION="${TEKTON_VERSION:-v1.15.0}"
+    validate_version TEKTON_VERSION "$TEKTON_VERSION"
 
     kubectl apply -f "https://github.com/tektoncd/pipeline/releases/download/${TEKTON_VERSION}/release.yaml"
 
@@ -320,6 +330,7 @@ print_summary() {
 
 main() {
     parse_args "$@"
+    validate_version SHIPWRIGHT_VERSION "$SHIPWRIGHT_VERSION"
     check_prereqs
     create_cluster
 
