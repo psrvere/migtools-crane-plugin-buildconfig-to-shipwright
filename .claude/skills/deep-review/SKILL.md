@@ -325,9 +325,15 @@ Dispatched   : <sub-agents, with model tier>
 Raw findings : N     After challenger: M   (removed: N-M)
 Verdict      : approve | comment | request-changes | reject
 Protected    : <paths, or "none">
+Verdict file : <RUN_DIR>/verdict.json   (/address-review --from reads this)
+Review body  : <RUN_DIR>/verdict.md
 ──────────────────────────────────────────────
 <findings, critical → info, each with file:line and remediation>
 ```
+
+The two paths are the files O13 step 6 writes. Print them literally, expanded, not as
+`$RUN_DIR`: the next skill is invoked by hand with one of them as an argument, and a
+variable name cannot be pasted.
 
 Always print what the challenger **removed** and why. That log is the main
 signal for whether the review is over- or under-firing, and it is the first
@@ -430,6 +436,21 @@ A full context package here runs to 300 KB or more. Pasting that into the
    pre-challenger findings at `$RUN_DIR/findings.json`. O9 prints what the
    challenger removed because that is the tuning signal; the signal is only
    checkable later if the raw replies still exist. Print `$RUN_DIR` at the end.
+6. Write the adjudicated verdict to two more files in the same directory, after the
+   challenger and after O16, so nothing that ran later can still move a severity:
+   - `$RUN_DIR/verdict.json` — the findings as they stand at that point, in the same
+     schema as `findings.json` in step 5, which is the finding object
+     `vendor/agent-review.md` defines: `severity`, `category`, `file`, `line`,
+     `description`, `remediation`. A finding O16 added keeps the sentence naming who
+     raised it first. No findings means an empty array, written all the same.
+   - `$RUN_DIR/verdict.md` — the review body exactly as it was rendered, after O11 and
+     with O12's trailer.
+
+   Both are written on every run, `--post` and report-only alike, and both paths go in
+   the O9 summary box. They are the hand-off to `/address-review --from`: with them on
+   disk, reviewing your own PR needs no review posted to GitHub for a second skill to
+   read back. Writing them is not posting anything — `$RUN_DIR` is outside the repo and
+   outside GitHub — so O3's report-only default is untouched.
 
 **The vendored 80 000-token guard still binds.** Writing the package to a file
 moves it out of your context, not out of the sub-agent's. Measure
@@ -467,7 +488,7 @@ replies that needed fixing up before they could be merged.
   vendored part list names, `### Diff` included, exactly once. Build these files
   by appending whole files with `cat`, never with `sed` line ranges into a
   document whose headings you do not control.
-- Size alone does not prove a part is there. On PR #23 `awk '…' -- "$1"` — BSD
+- Size alone does not prove a part is there. On PR #23 an `awk '…' -- "<file>"` — BSD
   `awk` reads `--` as a filename — composed six prompts whose Part 1, the
   sub-agent definition, was **empty**: 6 KB missing from a 262 KB file, well
   inside a factor of two. What gave it away was that all six came out the same
