@@ -133,8 +133,8 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
-github.com/shipwright-io/build v0.21.0 h1:2z+CJJLqrCKO0YIz8OWIzzBCHp41fbvP2KGc2qg5B8Y=
-github.com/shipwright-io/build v0.21.0/go.mod h1:10w/ql4Ukbg/ErXsxRR6Lb8IYXb7P39vpChNcOnXMNY=
+github.com/shipwright-io/build v0.21.4 h1:zAm2ynaxJQhB7fkqfiMx1I04Z34YL4/On6OTzckmUSg=
+github.com/shipwright-io/build v0.21.4/go.mod h1:HWCRji/1BdpmS5zSOagRBni2dx4MBC3ckCDkoKb0i98=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
 github.com/spf13/afero v1.2.2/go.mod h1:9ZxEEn6pIJ8Rxe320qSDBk6AsU0r9pR7Q4OcevTdifk=

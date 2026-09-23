@@ -57,7 +57,7 @@ declare fewer parameters, so a BuildConfig using `no-cache`, `squash`, `pull` or
 # - Cluster named "minikube-shipwright"
 # - Kubectl context "minikube-shipwright"
 # - Tekton Pipelines (required by Shipwright)
-# - Shipwright Build v0.21.0
+# - Shipwright Build v0.21.4
 # - Upstream Shipwright's sample ClusterBuildStrategies
 #   (buildah-strategy-managed-push, source-to-image, kaniko, ko, ...)
 # - Local registry addon
@@ -101,11 +101,11 @@ Creates a Minikube cluster with Shipwright Build for testing.
 
 **Common Options:**
 - `--cluster-name NAME` - Minikube profile name (default: `minikube-shipwright`)
-- `--k8s-version VERSION` - Kubernetes version (default: `v1.34.10`, required: v1.34+ for Shipwright v0.21.0)
+- `--k8s-version VERSION` - Kubernetes version (default: `v1.34.10`, required: v1.34+ for Shipwright v0.21.4)
 - `--cpus N` - CPU count (default: `4`)
 - `--memory MB` - Memory in MB (default: `8192`)
 - `--driver DRIVER` - Minikube driver (default: auto-detect)
-- `--shipwright-version VER` - Shipwright version (default: `v0.21.0`)
+- `--shipwright-version VER` - Shipwright version (default: `v0.21.4`)
 - `--skip-cluster-create` - Only install Shipwright, don't create cluster
 
 **Examples:**
@@ -258,7 +258,7 @@ export K8S_VERSION=v1.34.10
 export CPUS=6
 export MEMORY=16384
 export TEKTON_VERSION=v1.15.0
-export SHIPWRIGHT_VERSION=v0.21.0
+export SHIPWRIGHT_VERSION=v0.21.4
 ./hack/setup-minikube-shipwright.sh
 ```
 

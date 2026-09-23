@@ -151,8 +151,8 @@ github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
-github.com/shipwright-io/build v0.21.0 h1:2z+CJJLqrCKO0YIz8OWIzzBCHp41fbvP2KGc2qg5B8Y=
-github.com/shipwright-io/build v0.21.0/go.mod h1:10w/ql4Ukbg/ErXsxRR6Lb8IYXb7P39vpChNcOnXMNY=
+github.com/shipwright-io/build v0.21.4 h1:zAm2ynaxJQhB7fkqfiMx1I04Z34YL4/On6OTzckmUSg=
+github.com/shipwright-io/build v0.21.4/go.mod h1:HWCRji/1BdpmS5zSOagRBni2dx4MBC3ckCDkoKb0i98=
 github.com/sirupsen/logrus v1.10.2 h1:G2SED73/qrAu6YwbdxOD6peLkCBI3z7L+ykJFTXJBBo=
 github.com/sirupsen/logrus v1.10.2/go.mod h1:SLEg8TqYulVKKfIGHldVp2K2aYz2DKSVBq4g/H5bR7Q=
 github.com/spf13/afero v1.2.2/go.mod h1:9ZxEEn6pIJ8Rxe320qSDBk6AsU0r9pR7Q4OcevTdifk=

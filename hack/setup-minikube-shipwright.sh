@@ -16,7 +16,7 @@
 #   --cpus N               CPU count (default: 4)
 #   --memory MB            Memory in MB (default: 8192)
 #   --driver DRIVER        Minikube driver (default: auto-detect)
-#   --shipwright-version   Shipwright version (default: v0.21.0)
+#   --shipwright-version   Shipwright version (default: v0.21.4)
 #   --skip-cluster-create  Skip cluster creation, only install Shipwright
 #   --help                 Show this help
 #
@@ -27,7 +27,9 @@ K8S_VERSION="${K8S_VERSION:-v1.34.10}"
 CPUS="${CPUS:-4}"
 MEMORY="${MEMORY:-8192}"
 DRIVER="${DRIVER:-}"
-SHIPWRIGHT_VERSION="${SHIPWRIGHT_VERSION:-v0.21.0}"
+SHIPWRIGHT_VERSION="${SHIPWRIGHT_VERSION:-v0.21.4}"
+# Pinned to the tested Tekton release; override with the TEKTON_VERSION env var.
+TEKTON_VERSION="${TEKTON_VERSION:-v1.15.0}"
 SKIP_CLUSTER_CREATE="${SKIP_CLUSTER_CREATE:-false}"
 
 log() { echo "==> $*"; }
@@ -165,10 +167,6 @@ create_cluster() {
 
 install_tekton() {
     log "Installing Tekton Pipelines (required by Shipwright)"
-
-    # Pin to tested Tekton release (can be overridden via TEKTON_VERSION env var)
-    local TEKTON_VERSION="${TEKTON_VERSION:-v1.15.0}"
-    validate_version TEKTON_VERSION "$TEKTON_VERSION"
 
     kubectl apply -f "https://github.com/tektoncd/pipeline/releases/download/${TEKTON_VERSION}/release.yaml"
 
@@ -331,6 +329,9 @@ print_summary() {
 main() {
     parse_args "$@"
     validate_version SHIPWRIGHT_VERSION "$SHIPWRIGHT_VERSION"
+    # Checked here, not in install_tekton: that runs after create_cluster, which
+    # can delete and recreate a cluster before a bad version is ever noticed.
+    validate_version TEKTON_VERSION "$TEKTON_VERSION"
     check_prereqs
     create_cluster
 

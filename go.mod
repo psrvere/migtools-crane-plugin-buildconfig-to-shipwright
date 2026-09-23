@@ -6,7 +6,7 @@ require (
 	github.com/evanphx/json-patch v5.9.11+incompatible
 	github.com/konveyor/crane-lib v0.1.6-0.20260807130033-222a325c7cee
 	github.com/openshift/api v0.0.0-20220525145417-ee5b62754c68
-	github.com/shipwright-io/build v0.21.0
+	github.com/shipwright-io/build v0.21.4
 	github.com/sirupsen/logrus v1.9.4
 	k8s.io/api v0.36.4
 	k8s.io/apimachinery v0.36.4
