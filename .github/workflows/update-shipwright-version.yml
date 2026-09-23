@@ -55,7 +55,7 @@ jobs:
 
             Release notes: https://github.com/shipwright-io/build/releases/tag/${{ steps.bump.outputs.NEW_VERSION }}
 
-            ${{ steps.bump.outputs.GO_CHANGED == 'true' && format('**The go directive moved from {0} to {1}.** Update the Go version in `AGENTS.md` (the documentation test fails until you do) and check that mta-crane builds with Go {1} before merging.', steps.bump.outputs.OLD_GO, steps.bump.outputs.NEW_GO) || 'The go directive did not change.' }}
+            ${{ steps.bump.outputs.GO_CHANGED == 'true' && format('**The go directive moved from {0} to {1}.** Check the Go version `AGENTS.md` states (`TestReadmeVersionsMatchPins` compares major.minor only), and check that mta-crane builds with Go {1} before merging.', steps.bump.outputs.OLD_GO, steps.bump.outputs.NEW_GO) || 'The go directive did not change.' }}
 
             Before merging:
             - [ ] Unit, documentation and Minikube E2E checks pass. If none ran, the `SHIPWRIGHT_BUMP_TOKEN` secret is missing; close and reopen this pull request to start them.
