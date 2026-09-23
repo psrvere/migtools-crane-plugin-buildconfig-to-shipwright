@@ -49,7 +49,8 @@ object, and the single-resource contract stays.
   cannot see whether it applies.
 - W8, the pull-secret link command, no longer claims crane migrates the account, so it
   and W72 can share a Build without contradicting each other. Its command tail is
-  unchanged; quoting the names in it is BUILD-2439. The two also have to land on one
+  unchanged here; BUILD-2439 later kept an invalid name out of it with a placeholder
+  (ADR-0006). The two also have to land on one
   account: W8 links the secret to the account the BuildConfig named, so W72 keeps the
   BuildRun on that account unless the check shows it is missing, and says to carry the same
   secrets over when it does.

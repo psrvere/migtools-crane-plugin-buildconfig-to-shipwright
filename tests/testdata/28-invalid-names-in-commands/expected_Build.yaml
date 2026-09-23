@@ -1,0 +1,34 @@
+apiVersion: shipwright.io/v1beta1
+kind: Build
+metadata:
+  annotations:
+    buildconfig-to-shipwright/buildrun-template: |
+      apiVersion: shipwright.io/v1beta1
+      kind: BuildRun
+      metadata:
+        name: invalid-names-build-buildrun
+        namespace: buildconfig-demo
+      spec:
+        build:
+          name: invalid-names-build
+        serviceAccount: bad;sa
+    buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
+    crane.konveyor.io/conversion-warnings: |-
+      [buildconfig-demo/invalid-names-build] BuildConfig buildconfig-demo/invalid-names-build names ServiceAccount "bad;sa", which is not a valid Kubernetes name, so the target cluster will reject an object with that name. Any command in this Build's warnings shows <serviceaccount> in its place: correct the name in the export and convert again.
+      [buildconfig-demo/invalid-names-build] BuildConfig buildconfig-demo/invalid-names-build names ServiceAccount "bad;sa" and pull secret "registry-pull-secret". This conversion does not modify that ServiceAccount (the ServiceAccount warning on this Build describes how crane handles it), so attach the pull secret on the target cluster before running the BuildRun: oc -n buildconfig-demo secrets link <serviceaccount> registry-pull-secret --for=pull,mount
+      [buildconfig-demo/invalid-names-build] crane migrates ServiceAccount "bad;sa" named by BuildConfig buildconfig-demo/invalid-names-build, with its RoleBindings and any ClusterRoleBinding, ClusterRole or SCC that names it, if the account was in the export. It does not carry the account's secrets list: re-link any secret that was linked with --for=mount. Read the exported _cluster resources before applying them (no --skip-cluster-scoped), and check each name against the target: an SCC or ClusterRole is cluster-global, and an exported SCC carries the source cluster's own users and groups, so one that shares a name with an SCC on the target replaces it. Confirm the account holds the SCC the build strategy needs before running the BuildRun.
+      [buildconfig-demo/invalid-names-build] BuildConfig invalid-names-build uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
+    crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/invalid-names-build
+  name: invalid-names-build
+  namespace: buildconfig-demo
+spec:
+  output:
+    image: quay.io/example/invalid-names-build:latest
+    pushSecret: registry-push-secret
+  source:
+    git:
+      url: https://github.com/example/app.git
+    type: Git
+  strategy:
+    kind: ClusterBuildStrategy
+    name: buildah

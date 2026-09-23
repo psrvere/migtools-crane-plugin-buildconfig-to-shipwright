@@ -19,7 +19,28 @@ const (
 	nameHashLength = 8
 )
 
+// Placeholders stand in for a name that fails validation, so a command printed in
+// a warning never carries text a shell would interpret (BUILD-2439).
+const (
+	namespacePlaceholder      = "<namespace>"
+	serviceAccountPlaceholder = "<serviceaccount>"
+	pullSecretPlaceholder     = "<pull-secret>"
+)
+
 var invalidDNS1123LabelChars = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// commandArg returns value when check accepts it and placeholder otherwise. The
+// checks are the ones the API server applies, validation.IsDNS1123Label for a
+// namespace and validation.IsDNS1123Subdomain for a ServiceAccount or Secret, and
+// both alphabets are shell-inert, so a value that passes pastes safely. Go's %q is
+// not a substitute: it emits double quotes, inside which a shell still expands
+// $(...). An empty value is returned unchanged; it names nothing.
+func commandArg(value, placeholder string, check func(string) []string) string {
+	if value == "" || len(check(value)) == 0 {
+		return value
+	}
+	return placeholder
+}
 
 // sanitizeDNS1123Label converts name into a valid DNS-1123 label of at most
 // maxGeneratedNameLength characters. The second return value reports whether
