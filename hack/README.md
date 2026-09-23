@@ -123,6 +123,22 @@ Creates a Minikube cluster with Shipwright Build for testing.
 ./hack/setup-minikube-shipwright.sh --skip-cluster-create
 ```
 
+### `bump-shipwright.sh`
+
+Moves the Shipwright pin to the newest shipwright-io/build release. It updates
+`go.mod`, `tests/go.mod`, `hack/generate-expected/go.mod`, the default in
+`setup-minikube-shipwright.sh`, this page and the top-level `README.md`
+together, because `TestReadmeVersionsMatchPins` fails when they disagree. It
+does nothing when the pin is already the newest.
+
+```bash
+./hack/bump-shipwright.sh
+```
+
+`.github/workflows/update-shipwright-version.yml` runs it on the first of each
+month and opens the pull request. Run the workflow by hand from the Actions tab
+to check sooner.
+
 ## Cleanup
 
 To remove the Minikube cluster:

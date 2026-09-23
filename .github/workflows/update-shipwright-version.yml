@@ -1,0 +1,65 @@
+# Opens a pull request when shipwright-io/build publishes a release newer than
+# the go.mod pin. hack/bump-shipwright.sh does the edits.
+#
+# A pull request opened with the default GITHUB_TOKEN starts no other workflow,
+# so CI would not run on it. Store a PAT or GitHub App token with contents and
+# pull-requests write access as the SHIPWRIGHT_BUMP_TOKEN secret. Without it the
+# workflow falls back to GITHUB_TOKEN, and CI has to be started by hand, for
+# example by closing and reopening the pull request.
+name: Update Shipwright version
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    if: github.event_name == 'workflow_dispatch' || github.repository_owner == 'migtools'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          token: ${{ secrets.SHIPWRIGHT_BUMP_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Bump Shipwright
+        id: bump
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GOTOOLCHAIN: auto
+          GOPROXY: "https://proxy.golang.org"
+        run: hack/bump-shipwright.sh --output "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.bump.outputs.CHANGED == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.SHIPWRIGHT_BUMP_TOKEN || github.token }}
+          branch: bump-shipwright
+          delete-branch: true
+          signoff: true
+          commit-message: "chore: bump shipwright-io/build from ${{ steps.bump.outputs.OLD_VERSION }} to ${{ steps.bump.outputs.NEW_VERSION }}"
+          title: "chore: bump shipwright-io/build from ${{ steps.bump.outputs.OLD_VERSION }} to ${{ steps.bump.outputs.NEW_VERSION }}"
+          body: |
+            Moves the Shipwright pin from ${{ steps.bump.outputs.OLD_VERSION }} to ${{ steps.bump.outputs.NEW_VERSION }} in go.mod, tests/go.mod, hack/generate-expected/go.mod, `hack/setup-minikube-shipwright.sh`, `hack/README.md` and `README.md`.
+
+            Release notes: https://github.com/shipwright-io/build/releases/tag/${{ steps.bump.outputs.NEW_VERSION }}
+
+            ${{ steps.bump.outputs.GO_CHANGED == 'true' && format('**The go directive moved from {0} to {1}.** Check the Go version `AGENTS.md` states (`TestReadmeVersionsMatchPins` compares major.minor only), and check that mta-crane builds with Go {1} before merging.', steps.bump.outputs.OLD_GO, steps.bump.outputs.NEW_GO) || 'The go directive did not change.' }}
+
+            Before merging:
+            - [ ] Unit, documentation and Minikube E2E checks pass. If none ran, the `SHIPWRIGHT_BUMP_TOKEN` secret is missing; close and reopen this pull request to start them.
+            - [ ] The Kubernetes version in `hack/setup-minikube-shipwright.sh` still meets what this Shipwright release needs.
+            - [ ] The release notes hold no API change the converter has to follow.
+
+            Opened by `.github/workflows/update-shipwright-version.yml`. Running the workflow again rewrites this branch.

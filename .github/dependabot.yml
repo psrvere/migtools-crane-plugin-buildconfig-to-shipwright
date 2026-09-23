@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directories: ["/", "/tests"]
+    schedule:
+      interval: monthly
+    groups:
+      go-modules:
+        patterns: ["*"]
+    ignore:
+      # Shipwright sets the k8s and controller-runtime versions, and its pin is
+      # also written in hack/ and the README. update-shipwright-version.yml bumps
+      # all of them together. The sigs.k8s.io modules are named one by one, not
+      # as sigs.k8s.io/*, so sigs.k8s.io/yaml still gets Dependabot updates. The
+      # plugin imports yaml directly, and Shipwright's pin does not move it.
+      - dependency-name: github.com/shipwright-io/build
+      - dependency-name: k8s.io/*
+      - dependency-name: sigs.k8s.io/controller-runtime
+      - dependency-name: sigs.k8s.io/json
+      - dependency-name: sigs.k8s.io/randfill
+      - dependency-name: sigs.k8s.io/structured-merge-diff/v6
+      # Pinned to an unreleased pseudo-version for the NewResources API.
+      - dependency-name: github.com/konveyor/crane-lib
