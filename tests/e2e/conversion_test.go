@@ -101,5 +101,6 @@ var _ = Describe("BuildConfig to Shipwright Conversion", func() {
 		Entry("binary-docker-certs", "24-binary-docker-certs", "Docker with binary directory source, source configMaps and secrets"),
 		Entry("binary-asfile", "25-binary-asfile", "Docker with a single-file binary source (asFile)"),
 		Entry("binary-docker-resources", "26-binary-docker-resources", "Docker with binary directory source and resources"),
+		Entry("invalid-names-in-commands", "28-invalid-names-in-commands", "Docker with an invalid ServiceAccount name and a pull secret"),
 	)
 })

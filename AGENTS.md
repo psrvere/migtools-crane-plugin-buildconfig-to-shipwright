@@ -150,7 +150,7 @@ steps table in the architecture page if the pipeline order changed, and add a re
 
 ## Files you may own fully
 
-`main.go`, `tests/testdata/export/*`, `buildconfig/names.go`, `buildconfig/postcommit.go`,
+`main.go`, `tests/testdata/export/*`, `buildconfig/postcommit.go`,
 and two more conversion steps that write nothing to the Build, `processRunPolicy` and
 `processChainCandidates` with its `chainInputs`. Propose and ship; the maintainer reads the
 result, not the diff.
@@ -160,6 +160,10 @@ there but `processTriggers` and `processSource` use them to build warnings, so t
 reaches the `conversion-warnings` annotation on the Build, and both of those callers are
 read line by line. The architecture page's file table says the same thing: `chain.go` is
 "read every changed line".
+
+Not `buildconfig/names.go` either, since BUILD-2439. Its `commandArg` decides which names
+reach the commands the W8, W72 and W73 warnings tell the operator to paste into a shell,
+so a change there can put shell text into the `conversion-warnings` annotation.
 
 Nothing else. In particular this list does not cover `hack/*` or `buildconfig/*_test.go`,
 because CI executes both: `.github/workflows/test-e2e-minikube-pr.yml` runs the `hack/`

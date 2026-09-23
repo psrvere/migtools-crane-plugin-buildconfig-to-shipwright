@@ -1,6 +1,7 @@
 # ADR-0006: Never overwrite a named ServiceAccount, never guess a push credential
 
-Status: accepted. Decided 2026-08-25 (PR #55, PR #50). Reviewed 2026-09-02.
+Status: accepted. Decided 2026-08-25 (PR #55, PR #50). Reviewed 2026-09-02. Amended
+2026-09-23 by BUILD-2439: an invalid name no longer reaches the pasteable command.
 Enhancement proposal: not covered there.
 
 ## Context
@@ -34,9 +35,12 @@ different remedy in each warning.
 
 ## Consequences
 
-- The warning embeds three user-supplied names so it can be pasted. Accepted on purpose.
-  The names come from an export the API server validated as DNS-1123, so the command is
-  shell-safe unless someone edits the export by hand; the code does not quote them.
+- The warning embeds three user-supplied names so it can be pasted. Each goes into the
+  command only when it passes the API server's own rule: a DNS-1123 label for the
+  namespace, a subdomain for the ServiceAccount and the Secret. Otherwise `commandArg` puts
+  a placeholder in its place and [W75](../support-matrix.md#w75) names the bad value. `%q`
+  was rejected because a shell still expands `$(…)` inside double quotes. Amended by
+  BUILD-2439.
 - Two separate warnings fire when a named account and a pull secret appear together, one
   per story, kept apart so their tests stay independent.
 - A flag for a default push secret was declined to keep the command line small. Revisit only

@@ -1,0 +1,25 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: invalid-names-build
+  namespace: buildconfig-demo
+spec:
+  # Not a valid ServiceAccount name: the API server would reject it, so only a
+  # hand-edited export carries it. The pull-secret warning's oc command must
+  # show a placeholder instead of passing ";" to a shell.
+  serviceAccount: "bad;sa"
+  output:
+    to:
+      kind: DockerImage
+      name: quay.io/example/invalid-names-build:latest
+    pushSecret:
+      name: registry-push-secret
+  source:
+    type: Git
+    git:
+      uri: https://github.com/example/app.git
+  strategy:
+    type: Docker
+    dockerStrategy:
+      pullSecret:
+        name: registry-pull-secret
