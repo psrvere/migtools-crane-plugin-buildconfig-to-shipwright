@@ -33,14 +33,18 @@ without a design doc is how unresearched assumptions reach a PR.
   posts comments, attaches files, transitions issues, or writes story points. Recording the
   outcome in Jira is a separate step the user owns.
 
-## Voice — run /unslop on every user-facing message
+## Voice — plain words for everything the user reads
 
-Before showing the user any summary, question, report, or completion banner, pass the text
-through the `/unslop` skill so it reads like a person wrote it. This covers the Phase 0
-"Ready to proceed?" summary, every `AskUserQuestion` prompt and option, and the final
-Compliance Report / Completion Status. Commit messages are already unslopped per `AGENTS.md`;
-this extends the same bar to everything the user reads. (The PR body is `/create-pr`'s, and
-it unslops that itself.)
+Draft any summary, question, report, or completion banner the user sees with the
+`plain-words` skill (`.claude/skills/plain-words/SKILL.md`), which carries `/unslop`'s
+rules. This covers the Phase 0 "Ready to proceed?" summary, every `AskUserQuestion` prompt
+and option, and the final Compliance Report / Completion Status. Use none of this skill's
+own terms in that text (phase numbers, gate names) without saying what they mean. A decision
+question, where the user picks between options, opens with `Kind:` from
+`.claude/skills/decision-kinds.md` and gives each option one `Gain:` and one `Cost:` line;
+the template is in `/tech-design`'s Clarifying gates. Commit messages are written with
+`plain-words` too, per `AGENTS.md`. (The PR body is `/create-pr`'s, and it writes that with
+`plain-words` itself.)
 
 ## Repo & Tool Map
 
@@ -197,7 +201,7 @@ git -C "$CP" for-each-ref --format='%(refname:short)' refs/heads refs/remotes/or
    WIP branches may carry wrong assumptions. Verify param names match the actual strategy
    parameter, the approach matches the design doc, and tests assert the real param names.
 
-Present a summary (run it through `/unslop` first): "Implementing BUILD-XXXX. Design doc
+Present a summary (drafted with `plain-words`): "Implementing BUILD-XXXX. Design doc
 says: [summary]. Existing branches: [none / list]. Ready to proceed?" Wait for the answer.
 
 ## Branch Naming
@@ -422,8 +426,8 @@ git -C "$WT" commit --only -s -S -m "[BUILD-XXXX] <type>: <subject>" -- buildcon
    `docs`, or `chore`. `-s` adds the DCO sign-off (required by `AGENTS.md`). `-S` GPG-signs;
    if this machine has no signing key configured, drop `-S` and keep `-s`. End the message
    body with the trailer `Co-Authored-By: Claude` — **no email address** (a bare marker; it
-   is deliberately not GitHub's attributed-co-author form). Write the message through
-   `/unslop`. Before every commit, confirm the message's issue key equals the branch's issue
+   is deliberately not GitHub's attributed-co-author form). Write the message with
+   `plain-words`. Before every commit, confirm the message's issue key equals the branch's issue
    key.
 
    This is the final commit message. `/create-pr` preserves it rather than rewriting it, so
@@ -490,7 +494,7 @@ current="$(git -C "$WT" rev-parse HEAD)"
 
 ### Summary banner
 
-Run the banner through `/unslop` before printing it.
+Draft the banner with `plain-words` before printing it.
 
 ```text
 IMPLEMENTATION COMPLETE: BUILD-XXXX

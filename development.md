@@ -139,7 +139,7 @@ avoidable cost in the loop.
 
 | File | What it does |
 |------|--------------|
-| `.claude/skills/plain-words/SKILL.md` | The writing rules for every question, checkpoint and summary a skill shows you: plain words, the finding first, short sentences, no skill vocabulary. It carries the `/unslop` rules, so it works without that skill installed. Commit messages, PR bodies and posted comments still go through `/unslop` |
+| `.claude/skills/plain-words/SKILL.md` | The writing rules for every question, checkpoint and summary a skill shows you: plain words, the finding first, short sentences, no skill vocabulary. It carries the `/unslop` rules, so it works without that skill installed. Commit messages, PR titles and bodies, posted comments, thread replies and Jira comments are written with it too |
 | `.claude/skills/decision-kinds.md` | The kinds of decision a skill may ask you to make: scope, architecture, mapping, policy, compatibility, interface, security, code structure and testing. Every decision question opens with its kind, and gives each option one gain and one cost. `/tech-design`'s Clarifying gates holds the template |
 
 ## Getting started

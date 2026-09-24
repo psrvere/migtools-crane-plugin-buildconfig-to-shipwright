@@ -58,6 +58,12 @@ If the user asks to review an open PR, or someone else's PR, say so and point at
    from inside an Opus sub-agent; `simplify` (Sonnet) and `tech-document` (Opus) are
    sub-agents that do the work. The ceiling caps, it never raises: a reviewer that ran
    on Sonnet before stays on Sonnet.
+10. **Talk to the user in plain words.** Every question and the Stage 6 verdict are drafted
+    with the `plain-words` skill (`.claude/skills/plain-words/SKILL.md`), and use no stage
+    or check ids without saying what they check. A decision question, where the user picks
+    between options, opens with `Kind:` from `.claude/skills/decision-kinds.md` and gives
+    each option one `Gain:` and one `Cost:` line; the template is in `/tech-design`'s
+    Clarifying gates.
 
 ## Arguments
 

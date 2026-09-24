@@ -268,7 +268,7 @@ git commit -s
 
 - `-s` adds the DCO `Signed-off-by` trailer.
 
-Write the commit message through the `/unslop` skill before committing, so it
+Write the commit message with the `plain-words` skill before committing, so it
 reads like a person wrote it. This holds for every commit, including the fixes an
 agent makes after a `/deep-review` pass.
 

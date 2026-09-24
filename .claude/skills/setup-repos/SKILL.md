@@ -20,6 +20,15 @@ The user invoked this with: $ARGUMENTS
 - No arguments: full setup.
 - `update`: re-scan using the stored work directory and append only missing entries.
 
+## Talking to the user
+
+Draft every question and report with the `plain-words` skill
+(`.claude/skills/plain-words/SKILL.md`), and say what a label or step means rather than
+naming it bare. A decision question, where the user picks between options (Step 2's setup
+mode, proceeding without a required repo), opens with `Kind:` from
+`.claude/skills/decision-kinds.md` and gives each option one `Gain:` and one `Cost:` line;
+the template is in `/tech-design`'s Clarifying gates.
+
 ## Repositories
 
 | Label | Match on `origin` remote | Required |

@@ -182,9 +182,9 @@ this table is only an index. They are restated at the top of the generated
 | **O6** | Inject this repo's `AGENTS.md` plus the CI-parity, controller-runtime-skew, no-`replace`, and frozen-`convert/` invariants into every sub-agent | Repo knowledge upstream cannot have |
 | **O7** | `cross-repo-contracts` dispatches on crane-lib boundary changes; `--only` flag | Tuned for this repo |
 | **O8** | Fetch prior review inline via `gh`, accepting only a review carrying our head-SHA marker | Replaces `pre-fetch-prior-review.sh` *and* its provenance check |
-| **O9** | Report format, always printing challenger removals | Tuning signal |
+| **O9** | Report format, always printing challenger removals; text for the user drafted with `plain-words` | Tuning signal; the user has to read the summary without this skill's vocabulary |
 | **O10** | `$REVIEW_FINDING_SEVERITY_THRESHOLD` = `info` — suppress nothing | Upstream requires it; no harness to supply it |
-| **O11** | Run the review body through `unslop` before showing or posting it | It is prose a person reads |
+| **O11** | Write the review body with `plain-words` before showing or posting it | It is prose a person reads |
 | **O12** | `Co-authored-by: Claude` trailer on every review | Attribution |
 | **O13** | Prompts are written to `$RUN_DIR` and dispatched by path; raw replies kept there too, and the adjudicated verdict as `verdict.json` and `verdict.md` | 300 KB packages; O9's tuning signal is only checkable if the replies survive; and `/address-review --from` reads the verdict from disk instead of from a review posted on the PR |
 | **O14** | Check each composed prompt before dispatch; normalise sub-agent replies | A `sed` range once dropped the whole diff from the challenger prompt, silently |

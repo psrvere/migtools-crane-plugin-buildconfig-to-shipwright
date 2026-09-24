@@ -60,11 +60,15 @@ The user invoked this with: $ARGUMENTS
     (`bash "$SCRATCH/stage1.sh"`). The session refuses inline loops and heredocs that reach
     git, and a refused stage is a stage that did not run.
 
-## Voice — run /unslop on every user-facing message
+## Voice — plain words for everything the user reads
 
 The proposals, every `AskUserQuestion` prompt and option, the Docs record, and the
-compliance table all go through the `/unslop` skill before the user sees them. Run it once
-over the batch, not once per block.
+compliance table are all drafted with the `plain-words` skill
+(`.claude/skills/plain-words/SKILL.md`), which carries `/unslop`'s rules. Run it once over
+the batch, not once per block. Use none of this skill's own terms in that text without
+saying what they mean. A decision question, where the user picks between options, opens
+with `Kind:` from `.claude/skills/decision-kinds.md` and gives each option one `Gain:` and
+one `Cost:` line; the template is in `/tech-design`'s Clarifying gates.
 
 ## Repo & Tool Map
 
@@ -450,7 +454,8 @@ call this map cannot make; it belongs to the user or to a later pass, not to thi
 | 3 | a map inference only: no grep hit, section not read |
 
 **The writing checklist.** Every `Change` passes this before the batch goes through
-`/unslop`. `/unslop` removes AI tells; this removes ambiguity and the wrong voice:
+`plain-words`. `plain-words` removes AI tells and jargon; this removes ambiguity and the
+wrong voice:
 
 - The actor is named: "the plugin drops the trigger", not "the trigger is dropped", unless
   the table column already fixes the actor.
@@ -518,7 +523,7 @@ appended in every mode.
 
 ## Stage 5: Discuss
 
-Apply mode only. Show the proposals, unslopped, then ask. Use `AskUserQuestion` with
+Apply mode only. Show the proposals, in plain words, then ask. Use `AskUserQuestion` with
 `multiSelect: true`, at most four proposals per question and four questions per call. Each
 option's label is `P<n> <doc> › <section>`; its description is the `Because` line. The
 built-in "Other" is where the user rewrites a `Change`. Pre-existing blocks go in a separate
@@ -602,7 +607,7 @@ diff "$SCRATCH/md-before.txt" "$SCRATCH/md-after.txt" | grep -E '^[<>]' | sed 's
 undid a change that was already in the tree; that is a `REVERTED` you did not intend.
 Either mismatch caps the run at **DONE_WITH_CONCERNS** and is named in the record.
 
-Print this, unslopped. Callers paste it into their own records, so it has to stand on its
+Print this, in plain words. Callers paste it into their own records, so it has to stand on its
 own:
 
 ```text
@@ -747,7 +752,7 @@ names a PR is `WAITING` until that PR merges, and is reported under "Not landed"
 **A4. Keeper tests** as in Stage 2, on the clean tree. A failure here is pre-existing by
 definition and is reported as such.
 
-**A5. Report.** No doc is edited. Print, unslopped:
+**A5. Report.** No doc is edited. Print, in plain words:
 
 ```text
 AUDIT: <branch> @ <HEAD short SHA>

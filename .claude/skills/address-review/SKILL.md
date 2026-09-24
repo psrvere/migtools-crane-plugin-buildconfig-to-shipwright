@@ -54,10 +54,15 @@ changes: it still arrives as a review item and is handled the same way.
   file via `scripts/reply-to-thread` or `gh pr comment --body-file`, never inside a shell
   string.
 - Commit only the files the fix agents reported, listed literally. Never `git add .`.
-- Every outward text (commit message, each reply, the summary) goes through the `unslop`
-  skill first; the footer is appended after, verbatim. If the `unslop` skill is not
-  available, offer to install it; if the user declines, use the text as drafted and say
-  so in the summary.
+- Every outward text (commit message, each reply) is written with the `plain-words`
+  skill (`.claude/skills/plain-words/SKILL.md`), which carries `/unslop`'s rules; the
+  footer is appended after, verbatim.
+- Text for the user (the Stage 3 table, each `ask` question, the summary) is drafted with
+  the `plain-words` skill (`.claude/skills/plain-words/SKILL.md`) and uses none of this
+  skill's own terms (stage numbers, verdict names) without saying what they mean. A
+  decision question, where the user picks between options, opens with `Kind:` from
+  `.claude/skills/decision-kinds.md` and gives each option one `Gain:` and one `Cost:`
+  line; the template is in `/tech-design`'s Clarifying gates.
 - Every Agent call passes `model`, and the ceiling is `opus`: triage and fix on Sonnet,
   the challenger on Opus. An omitted model inherits the session's, which may sit above
   Opus; that is a bug, not a default. The ceiling caps, it never raises: a stage that
@@ -318,7 +323,8 @@ anyone's comment on the PR. `what happens` is plain English, no file paths beyon
 answered, bots, boilerplate)".
 
 Under the table, one short paragraph per `ask` point: what they said, what was found, the
-question, the options, and "I'd do …".
+question, the options with a gain and a cost each, and "I'd do …". Open it with its
+`Kind:`, as the iron rules say.
 
 With `--dry-run`: print every reply draft under the table (with `<sha>` left as is), then
 the line "dry run, nothing written or posted", and stop here without waiting.
@@ -376,7 +382,7 @@ summary and the commit body.
 Issue key: `KEY=$(printf '%s' "$BRANCH" | grep -oE '^BUILD-[0-9]+' || true)`. Subject is
 `[$KEY] <type>: <what the review caught>` when `KEY` is set, otherwise `<type>: …`. Type
 is `docs`, `fix` or `test` by the dominant change. Body: one line per fixed point, then
-`Co-Authored-By: Claude`. Pass the message through the `unslop` skill, write it to
+`Co-Authored-By: Claude`. Write the message with the `plain-words` skill, save it to
 `$SCRATCH/commit-msg.txt` with the Write tool (never a heredoc or `echo`: the body
 carries reviewer wording), then:
 
@@ -437,8 +443,8 @@ body:
    `Co-Authored-By: Claude` line, and any `<!-- ... -->` block, in that order. A bot's
    summary block belongs to the bot; editing a word of it misattributes the text, and the
    bot rewrites its own block on its next run anyway.
-5. Run the new text through the `unslop` skill. What rule 4 copies verbatim is excluded,
-   the way Stage 7 excludes the blockquotes and the footer.
+5. Write the new text with the `plain-words` skill. What rule 4 copies verbatim is
+   excluded, the way Stage 7 excludes the blockquotes and the footer.
 
 Write the result to `$SCRATCH/pr-body.md` with the Write tool. Never a heredoc and never
 `--body` with an inline string: the body carries reviewer wording and commit subjects.
@@ -479,7 +485,7 @@ like any other.
    `@<author>`, then each point's current `reply` for every point whose verdict is not
    `skip`, `ask` or `unapplied` (a point's reply already opens with the quote), a blank
    line between; if no point remains, post nothing for the item. Replace `<sha>` with
-   `$POST_SHA`. Pass only the answer sentences through the `unslop` skill; the
+   `$POST_SHA`. Write only the answer sentences with the `plain-words` skill; the
    blockquoted reviewer lines and the footer are copied verbatim. Append, verbatim, a
    blank line then:
 
@@ -531,7 +537,7 @@ Any id the `grep` prints is a thread you meant to resolve that is still open: li
 stay open (human pushback, user keep-open, `ask`, `unapplied`, failed post) or a `skip`.
 Anything else is listed as "still open" too.
 
-Print the summary, through `unslop`:
+Print the summary, drafted with `plain-words`:
 
 ```
 Addressed 6 of 6 items on PR #66.

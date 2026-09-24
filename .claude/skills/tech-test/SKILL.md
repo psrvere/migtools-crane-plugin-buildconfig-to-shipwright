@@ -159,6 +159,12 @@ These override everything below.
     never terminates early and never terminates late — it just burns the timeout.
 11. **Delete only what this skill created.** A namespace, strategy or gist that already
     existed is the user's. Ask before touching it.
+12. **Talk to the user in plain words.** Every question, the U7 report and the Compliance
+    Report are drafted with the `plain-words` skill (`.claude/skills/plain-words/SKILL.md`),
+    and use no stage ids or other terms of this skill without saying what they mean. A
+    decision question, where the user picks between options, opens with `Kind:` from
+    `.claude/skills/decision-kinds.md` and gives each option one `Gain:` and one `Cost:`
+    line; the template is in `/tech-design`'s Clarifying gates.
 
 ---
 

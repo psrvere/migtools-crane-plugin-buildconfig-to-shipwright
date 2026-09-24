@@ -339,6 +339,15 @@ Always print what the challenger **removed** and why. That log is the main
 signal for whether the review is over- or under-firing, and it is the first
 thing to tune.
 
+The lines under the box, and any question put to the user (the `--post`
+confirmation included), are drafted with the `plain-words` skill
+(`.claude/skills/plain-words/SKILL.md`) and use no override ids, dimension names or
+step numbers without saying what they mean. A decision question, where the user
+picks between options, opens with `Kind:` from `.claude/skills/decision-kinds.md`
+and gives each option one `Gain:` and one `Cost:` line; the template is in
+`/tech-design`'s Clarifying gates. The review body meant for GitHub still goes
+through O11.
+
 ### O10. Severity threshold — report everything
 
 `vendor/agent-review.md:54-57` marks `$REVIEW_FINDING_SEVERITY_THRESHOLD` as
@@ -357,42 +366,23 @@ Report-only is already the default (O3), so the useful failure mode here is
 showing too much rather than too little. If that becomes noisy, raise this to
 `low` rather than reintroducing an unset variable.
 
-### O11. Unslop the review body before sharing it
+### O11. Write the review body with plain-words before sharing it
 
-Every review this skill shows or posts is prose a person reads. Run it through
-the `superpowers:unslop` skill first so it does not read as machine-generated —
-no em-dash pile-ups, no puffery, no boilerplate structure.
+Every review this skill shows or posts is prose a person reads. Write it with the
+`plain-words` skill (`.claude/skills/plain-words/SKILL.md`), which ships with this
+repo and carries `/unslop`'s rules, so it does not read as machine-generated: no
+em-dash pile-ups, no puffery, no boilerplate structure.
 
 After you have composed the review body (O9) and settled the verdict, but
 **before** you render it to the terminal (the O3 default) or show it for `--post`
-confirmation:
+confirmation, rewrite the full review body with `plain-words` and share the result
+instead of the raw text. It rewrites *wording only*. Preserve these verbatim — do
+not let it touch them:
 
-1. **Check whether `/unslop` is available.** It is available if it appears in the
-   skills list or the Skill tool can invoke it (`superpowers:unslop`, or a bare
-   `unslop`). Do not assume — check.
-
-2. **If it is available:** run it over the full review body and share the result
-   instead of the raw text. Unslop rewrites *wording only*. Preserve these
-   verbatim — do not let it touch them:
-   - the hidden `<!-- **Head SHA:** ... -->` first line (O8 re-review anchoring
-     reads it exactly as written; a reworded marker breaks the next run),
-   - every `file:line` reference,
-   - every code or command snippet and the fixed summary box from O9.
-
-3. **If it is not available:** do not silently skip it. Tell the user what the
-   skill does and offer to install it, then continue. Use this explanation:
-
-   > `/unslop` rewrites text to strip AI tells — em-dash overuse, puffery,
-   > filler, and formulaic structure — so the review reads like a person wrote
-   > it. It only changes wording; it never changes the findings, severities, or
-   > verdict.
-   >
-   > Install it with:
-   > `npx skills add https://github.com/cursor/plugins --skill unslop`
-
-   Ask whether to install it now. If yes, run that command and then do step 2. If
-   no, or the install fails, share the review as-is with a one-line note that it
-   was not unslopped.
+- the hidden `<!-- **Head SHA:** ... -->` first line (O8 re-review anchoring
+  reads it exactly as written; a reworded marker breaks the next run),
+- every `file:line` reference,
+- every code or command snippet and the fixed summary box from O9.
 
 This runs on **every path that surfaces the review** — the report-only default and
 the `--post` confirmation body alike. It changes how the review reads, never what
@@ -402,8 +392,8 @@ O11 runs.
 ### O12. Sign every review — `Co-authored-by: Claude`
 
 Every review this skill renders or posts ends with a trailer crediting Claude as
-co-author. Append it as the **last step**, after O11 has run, so unslop never
-rewrites it and it is always present and exact:
+co-author. Append it as the **last step**, after O11 has run, so the rewrite never
+touches it and it is always present and exact:
 
 ```
 Co-authored-by: Claude

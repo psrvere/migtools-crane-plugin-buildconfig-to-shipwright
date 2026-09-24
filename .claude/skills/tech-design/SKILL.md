@@ -141,49 +141,88 @@ dissolves the questions behind it.
 Lead with the answer. For a checkpoint or a direct factual question, the first content
 line is the recommendation or the fact the human asked for, in one sentence; context
 and options follow for a reader who wants them. A decision question uses the `Q<N>`
-template below, where the `Q<N> — <title>` line is a label, not content, and one or two
-framing sentences precede the `Recommendation:` line so the reader can weigh the letter
-— nothing else may come before it. A three-option brief with a paragraph of setup got
+template below, where the `Q<N>. <title>` line is a label, not content, and the
+recommendation comes after the options, since it only reads as a reason once the
+trade-offs are on the page. A three-option brief with a paragraph of setup got
 interrupted on BUILD-2334 with "super short answer". The sentence it was missing was
 "yes, the bump waits on a tag, and the noise can be fixed without it".
 
-Ask in plain text, and keep the whole question under fifteen lines. No `file:line`, no
-citations, no option cards: AskUserQuestion is not in this skill's tool list, because
-its option descriptions invite exactly the density that keeps getting cut. Run the
-question through `/unslop` before sending it. This applies to the Phase 1 and Phase 7
-checkpoints as much as to clarifying questions. On BUILD-2315 a three-option card with
-a paragraph of setup was rejected and rewritten on request as twelve short lines: a
-two-sentence problem, three one-line options, "which one: A, B, or C?". That version
-got a one-word answer.
+Use no skill vocabulary in text meant for the human. Fork and forked, ceremony class,
+signal N, walk, `D-N`, phase numbers and outcome names like `plugin-gap` are this skill's
+own terms; say what they mean instead. On BUILD-2500 a question opened with "Phase 4 has
+one real fork", and the human had to ask what that meant. The fix was "One design
+decision needs your call." The Phase 1 checkpoint still names the topic and ceremony
+class, because the human confirms them, but says in the same breath what each one means.
 
-That version is the shape. Write every question and checkpoint to it:
+Every decision question opens, under its title line, with `Kind:` and its kind from
+[`../decision-kinds.md`](../decision-kinds.md). The kind tells the human what sort of
+call this is before they read the options, and a scope or architecture question gets
+more of their attention than a mapping one.
+
+Ask in plain text, and keep the whole question under about twenty-five lines. No
+`file:line`, no citations, no option cards: AskUserQuestion is not in this skill's tool
+list, because its option descriptions invite exactly the density that keeps getting cut.
+Draft every question and checkpoint with the `plain-words` skill, which carries
+`/unslop`'s rules. This applies to the Phase 1 and Phase 7 checkpoints as much as to
+clarifying questions. On BUILD-2315 a three-option card with a paragraph of setup was
+rejected and rewritten on request as twelve short lines: a two-sentence problem, three
+one-line options, "which one: A, B, or C?". That version got a one-word answer.
+
+It was also too thin. On BUILD-2500 the options came without their trade-offs, so the
+human could not see why to pick one. Every option now carries one `Gain:` line and one
+`Cost:` line. That is why the cap moved from fifteen lines to about twenty-five: two
+options with a gain and a cost each, plus the kind and the setup, do not fit in fifteen.
+Write every question to this shape:
 
 ```text
-Q<N> — <one-line title>
-<What the thing is and what is at stake, in one or two plain sentences that a reader
+Q<N>. <one-line title>
+Kind: <kind>. <One clause on why it is not a nearby kind, when that could confuse.>
+
+<What the thing is and what is at stake, in one to three plain sentences that a reader
 who has not seen the research can follow.>
-Recommendation: <option> because <one plain reason>.
-A) <option, one line, an outcome not a mechanism>
-B) <option, one line>
-C) <option, one line, only when a real third exists>
+
+A) <option, an outcome not a mechanism>
+- Gain: <what this option buys, one line>
+- Cost: <what it gives up or risks, one line>
+
+B) <option>
+- Gain: <one line>
+- Cost: <one line>
+
+C) <only when a real third exists, same two lines>
+
+How much it matters: <optional. How common the affected case is, from evidence: a
+fixture count, the client samples, a grep.>
+
+Recommendation: <option>, because <one plain reason>.
+
 Reply with a letter.
 ```
 
 `Q<N>` counts questions within a run, starting at Q1, and keeps them apart from the
-spec's `D-N` decision ids; the two fixed checkpoints use the same shape without a
-number. This is gstack's prose decision brief with the completeness scores and the
-per-option pros and cons removed, because those bullets are the density the cards were
-rejected for. The BUILD-2340 question that got the one-word answer, for the record:
+spec's `D-N` decision ids; the two fixed checkpoints use the same plain style without a
+number or options. This is gstack's prose decision brief with the completeness scores and
+the multi-bullet pro and con lists removed, because those are the density the cards were
+rejected for. One gain and one cost line per option is not that density: it is the least
+a reader needs to choose. The BUILD-2500 question, as the human approved it:
 
-> Q1 — Inline Dockerfile
-> Some BuildConfigs have the Dockerfile typed directly into them instead of in the git
-> repo. Today we print an error and throw that text away. The buildah strategy cannot
-> take Dockerfile text, so the build will not run either way; the only question is
-> whether to keep the text.
-> Recommendation: A because nothing is lost and the user can copy it into the repo later.
-> A) Put the text in a ConfigMap next to the Build.
-> B) Keep throwing it away and warn.
-> C) Put the text in an annotation on the Build.
+> Q1. How env vars reach s2i
+> Kind: mapping, with a compatibility side. Both options change only the plugin, so this isn't an architecture decision. Both keep secrets on the same path OpenShift used, so it isn't a security decision either.
+>
+> Each entry in the strategy's `build-env` list is passed to `s2i build -e`. On OpenShift, entries could read from a ConfigMap, a Secret, or a field of the build, or refer to another entry as `$(OTHER)`. OpenShift filled all of these in before the build ran.
+>
+> A) Keep `spec.env` as it is, and add `NAME=$(NAME)` to `build-env` for each entry. Kubernetes fills in the value when the build starts.
+> - Gain: every kind of entry works as it did on OpenShift. It's the same approach BUILD-1491 chose for Docker.
+> - Cost: the Build shows `NAME=$(NAME)` rather than the value. If someone deletes an entry from `spec.env`, s2i receives the literal text `$(NAME)`. A field reference like `metadata.name` gives the build pod's name, where OpenShift gave the Build's name.
+>
+> B) Reuse the build-args code. Plain values become `NAME=VALUE`, and ConfigMap and Secret keys become references.
+> - Gain: the Build shows each value directly, and it matches the story's wording.
+> - Cost: field references are dropped with a warning. `$(OTHER)` stays unfilled unless `spec.env` is also kept. `optional: true` is lost, so a missing ConfigMap key fails the build.
+>
+> How much it matters: only fixture `09-s2i-with-envvars` has field references or `$(OTHER)`. None of the client samples use the Source strategy.
+>
+> Recommendation: A, because it leaves no kind of entry behind, and its costs are about readability rather than broken builds.
+>
 > Reply with a letter.
 
 Log each answer the moment it arrives, to
@@ -380,9 +419,11 @@ and then failing the conversion walk with three not-applicable links.
 
 **Ceremony class** — how much work: `trivial`, `bounded`, `forked`. See above.
 
-Present both, and name the signal: "Topic `field-mapping`, ceremony `trivial`, no upgrade
-signal fired. Topic decides which repos I read and which Phase 3 walk applies; ceremony
-decides how much. Does that look right?" Wait for confirmation.
+Present both, each with what it means, and say whether anything in the issue points to a
+real choice: "This story maps one BuildConfig field to its Shipwright field (topic
+`field-mapping`), so I'll read the plugin and the Shipwright API. It looks small (ceremony
+`trivial`): one field, and the mapping is obvious. Nothing in the issue asks us to choose
+between two ways of building it. Does that look right?" Wait for confirmation.
 
 Run Phase 2's scope check before presenting, and carry its answer into the question. It
 is one grep of the target repo for what the story says exists, and it changes what the
@@ -887,8 +928,9 @@ This skill produces two artifacts. **Both are gated on one explicit approval.**
 Present both, and a third item when it applies:
 
 1. **Spec** — the target path, and a summary of what it contains, including the
-   ceremony class, the Phase 3 outcome, and the unresolved-marker count.
-2. **Jira comment** — the exact text, verbatim, after `/unslop`.
+   ceremony class, the Phase 3 outcome, and the unresolved-marker count, each said in
+   plain words as Clarifying gates describes.
+2. **Jira comment** — the exact text, verbatim, as written with `plain-words`.
 3. **Retitle** — when the surviving scope no longer matches the Jira title, the proposed
    new title. Both runs on 2026-08-24 needed one: BUILD-2316 dropped `--dest-registry`,
    BUILD-2315 kept one of seven items. A title describing work that no longer exists
@@ -1076,11 +1118,18 @@ in the file. `/tech-implement` reads this line and refuses to start on a non-zer
 
 # Jira Comment
 
-Post a summary: the necessity outcome, the capability outcome, the chosen approach with
-its `D-N` id, the unresolved-marker count, and a link to the spec path. Keep it short;
-the spec is the detail.
+Post a summary in plain words: whether the work is needed, which repo the fix lands in,
+the chosen approach, and whether any question is still open. Keep it short; the spec is
+the detail.
 
-Run the comment through `/unslop` before posting, and post it from a file (Phase 7,
+Name no local path, folder, worktree or scratch file. The spec lives in the Designs
+Directory on one machine, and a Jira reader cannot open it; a path there tells them
+nothing and exposes the author's disk layout. Say "the design spec" and, when it has one,
+link the spec's public URL instead. Skill ids (`D-N`, outcome names such as `plugin-gap`)
+stay out of the comment too, for the same reason. _(Origin: BUILD-2500, whose draft
+comment ended in a `designs/...md` path.)_
+
+Write the comment with the `plain-words` skill, and post it from a file (Phase 7,
 step 2). Jira is read by people who never open the spec, and the comment is the one
 place this skill's prose reaches them unedited.
 

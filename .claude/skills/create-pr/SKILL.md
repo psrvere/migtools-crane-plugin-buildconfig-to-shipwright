@@ -29,6 +29,12 @@ story.
   project chose the plain line for consistency across all skills.
 - **Voice:** run the `unslop` skill over the commit body, PR title, and PR body
   before using them (strip AI tells, plain human voice).
+- **Talking to the user:** every question, confirmation and the Step 10 report is drafted
+  with the `plain-words` skill (`.claude/skills/plain-words/SKILL.md`) and uses no step
+  numbers or other terms of this skill without saying what they mean. A decision question,
+  such as Step 3b's run-or-skip, opens with `Kind:` from `.claude/skills/decision-kinds.md`
+  and gives each option one `Gain:` and one `Cost:` line; the template is in
+  `/tech-design`'s Clarifying gates.
 
 ## Arguments
 
@@ -83,8 +89,8 @@ If the user passed a Jira key, use it. Otherwise ask via AskUserQuestion with
     -d "$(jq -n --argjson points "$POINTS" '{fields: {customfield_10028: $points}}')"
   ```
 
-  Run the `unslop` skill over the summary and body first, and show them to the
-  user before creating. Use the new key for the rest of the flow.
+  Write the summary and body with the `plain-words` skill first, and show them to
+  the user before creating. Use the new key for the rest of the flow.
 
 Capturing a key here means Step 9 runs. No key means Step 9 is skipped.
 
