@@ -11,7 +11,8 @@ https://github.com/konveyor/enhancements/pull/300
 ## Development skills
 
 This repo ships nine Claude Code skills under `.claude/skills/` that take a Jira BUILD issue
-from triage to a merged pull request. [`development.md`](development.md) is the map: the
+from triage to a merged pull request, plus a tenth, `plain-words`, that they all use for
+text a person reads. [`development.md`](development.md) is the map: the
 workflow, what each skill needs and leaves behind, and a walkthrough. Each skill's full
 instructions live in its own `SKILL.md`.
 

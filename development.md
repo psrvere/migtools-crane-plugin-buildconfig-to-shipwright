@@ -1,7 +1,7 @@
 # Development skills
 
-This repo ships nine [Claude Code](https://claude.com/claude-code) skills under
-`.claude/skills/`. Together they automate the path from a Jira BUILD issue to a merged
+This repo ships nine [Claude Code](https://claude.com/claude-code) workflow skills under
+`.claude/skills/`, plus a writing helper they all share. Together the nine automate the path from a Jira BUILD issue to a merged
 pull request: research and triage, implementation, unit and cluster testing, a pre-PR
 review gate, a docs sync, opening the PR, multi-agent review of the published PR, and
 addressing the feedback that comes back.
@@ -134,6 +134,13 @@ avoidable cost in the loop.
 | `/create-pr [<ISSUE-KEY>]` | Commits signed-off, pushes to your fork, and opens (or amends) the PR against upstream with this repo's conventions enforced, updating the Jira story when asked. Never pushes to `origin` | A branch ready to publish | A commit, a fork push, and an open PR |
 | `/deep-review <pr-number\|url>` | Up to six reviewers read an open PR in parallel, each with an explicit list of what it does and does not own, so they do not all report the same naming nit. A challenger then runs as its own stage: it reads the findings and the diff, but never the orchestrator's reasoning, and can only delete findings, never add them. If a top-tier reviewer returns nothing, that silence is recorded as a finding rather than passing as a clean bill of health | An open PR | Findings in the terminal, and `verdict.json` plus `verdict.md` in the run directory, which is what `/address-review --from` reads. Posts nothing unless asked |
 | `/address-review [<pr-number\|url>] [--from <verdict.json>]` | Reads every inline thread, review write-up and PR comment, the bots and your own `/deep-review` verdict included, and triages each into fix, answer or push back. `--from` takes that verdict from `/deep-review`'s run directory instead of from a review posted on the PR, and those findings skip triage because deep-review's challenger already adjudicated them. After you approve the table it fixes the code, tests with `GOWORK=off`, commits signed, pushes to the fork, rewrites the parts of the PR body the fixes made wrong, replies where each comment was left, and resolves the threads | An open PR with feedback, a `/deep-review` verdict file, or both | Fixes on the branch; a refreshed PR body; replies and resolved threads on the PR |
+
+### Shared by every skill
+
+| File | What it does |
+|------|--------------|
+| `.claude/skills/plain-words/SKILL.md` | The writing rules for every question, checkpoint and summary a skill shows you: plain words, the finding first, short sentences, no skill vocabulary. It carries the `/unslop` rules, so it works without that skill installed. Commit messages, PR bodies and posted comments still go through `/unslop` |
+| `.claude/skills/decision-kinds.md` | The kinds of decision a skill may ask you to make: scope, architecture, mapping, policy, compatibility, interface, security, code structure and testing. Every decision question opens with its kind, and gives each option one gain and one cost. `/tech-design`'s Clarifying gates holds the template |
 
 ## Getting started
 
