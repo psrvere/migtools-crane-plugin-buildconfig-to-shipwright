@@ -221,6 +221,14 @@ git rev-parse --git-path index    # must be under .git/worktrees/, not the share
 git rev-parse --short HEAD        # detached, so --show-current prints nothing; check the SHA instead
 ```
 
+The branch ref holds committed work only, and a story branch's work usually sits
+uncommitted: `/tech-implement` leaves it that way, and only `/create-pr` or `/edit-pr`
+commit it (`AGENTS.md` › Commit policy). When the branch is checked out in another worktree
+with uncommitted changes, copy them into `$WT` the way `/tech-review` Stage 0g does (the
+patch, the untracked files, `add --all`, `write-tree`), with a `mktemp -d` scratch
+directory, and change nothing in the source worktree. Test that tree, and put its tree id
+in the report beside the SHA. With nothing to carry, say so.
+
 Remove the worktree at the end of the stage: `git worktree remove "$WT"`.
 
 ## U3 — Compile gate
@@ -325,7 +333,7 @@ here produces two records that drift.
 
 ```
 tech-test unit — BUILD-XXXX
-Branch:   <resolved-branch> @ <short-sha>
+Branch:   <resolved-branch> @ <short-sha>, tree <tree id | no uncommitted work>
 Build:    exit 0
 Vet:      exit 0
 Tests:    N passed, M failed — exit 0

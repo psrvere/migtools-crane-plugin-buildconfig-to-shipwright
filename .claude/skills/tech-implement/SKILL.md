@@ -1,6 +1,6 @@
 ---
 name: tech-implement
-description: Implement a previously triaged Jira issue end-to-end. Reads the design doc from /tech-design, plans the change, implements it, runs unit and cluster tests, reviews, and opens a PR. Trigger when the user says "tech-implement", "implement BUILD-XXXX", or "build this issue".
+description: Implement a previously triaged Jira issue end-to-end. Reads the design doc from /tech-design, plans the change, implements it, runs unit and cluster tests, and leaves the change uncommitted for /create-pr to commit and push. Trigger when the user says "tech-implement", "implement BUILD-XXXX", or "build this issue".
 argument-hint: <ISSUE-KEY>
 allowed-tools: [Bash, Read, Write, Edit, WebSearch, WebFetch, Agent, AskUserQuestion, Skill, EnterPlanMode, ExitPlanMode]
 ---
@@ -21,13 +21,15 @@ without a design doc is how unresearched assumptions reach a PR.
 
 ## Iron Law
 
-- **Never push to `origin`.** `origin` is the shared upstream org repo. Branches go to the
-  fork remote, and changes reach upstream only through a PR.
+- **Never commit, amend or push.** Only `/create-pr` and `/edit-pr` do that (`AGENTS.md` ›
+  Commit policy). The change stays uncommitted in the worktree until `/create-pr` commits
+  it and pushes it to the fork; `origin` is the shared upstream org repo and is never a
+  push target.
 - **Never work in the user's checkout.** Use a git worktree — see **Isolation** below.
 - **Never edit the operator's strategy files.** They are generated. Strategy changes go to
   the Strategy Catalog Repo.
 - **Never edit the Crane Lib Repo.** It is frozen prior art, not a PR target.
-- **One branch = one story.** Never add a commit for a different BUILD key to this branch.
+- **One branch = one story.** Never put work for a different BUILD key on this branch.
 - **No status claim without a results file.** See the Phase 7 Definition-of-Done gate.
 - **This skill never writes to Jira.** It may *read* Jira for context (optional). It never
   posts comments, attaches files, transitions issues, or writes story points. Recording the
@@ -42,9 +44,8 @@ and option, and the final Compliance Report / Completion Status. Use none of thi
 own terms in that text (phase numbers, gate names) without saying what they mean. A decision
 question, where the user picks between options, opens with `Kind:` from
 `.claude/skills/decision-kinds.md` and gives each option one `Gain:` and one `Cost:` line;
-the template is in `/tech-design`'s Clarifying gates. Commit messages are written with
-`plain-words` too, per `AGENTS.md`. (The PR body is `/create-pr`'s, and it writes that with
-`plain-words` itself.)
+the template is in `/tech-design`'s Clarifying gates. The commit message and the PR body
+are `/create-pr`'s, and it writes them with `plain-words` too.
 
 ## Repo & Tool Map
 
@@ -272,7 +273,7 @@ jq -e '.patches' "$SCRATCH/resp.json" >/dev/null \
 ```
 
 A multi-document fixture is driven one document at a time and the outputs of one kind are
-joined with `---`. Read every generated file before committing it: a hand-written golden
+joined with `---`. Read every generated file before handing it over: a hand-written golden
 encodes what you expect; a generated one encodes what the code does, which is what the
 reviewer needs to see, and a wrong value in it is a bug to fix in the code, not in the
 file. Run the suite afterwards:
@@ -364,7 +365,7 @@ and it will only surface as a suite failure later.
    files generated from the plugin, and the `Entry` in `tests/e2e/conversion_test.go`.
 4. **Run them**: `GOWORK=off go test ./... -count=1`, then
    `(cd tests && GOWORK=off go test ./e2e -count=1)`.
-5. **Docs, in the same commit.** Once the tests pass, invoke `/tech-document BUILD-XXXX --work "$WT"`
+5. **Docs, in the same change.** Once the tests pass, invoke `/tech-document BUILD-XXXX --work "$WT"`
    yourself, at the orchestrator level: it asks the user which proposals to apply, so it
    cannot run as a sub-agent. It maps the diff to the docs it touches (README, `AGENTS.md`,
    `hack/README.md`, `docs/`), shows each proposed edit next to the code line that caused
@@ -394,14 +395,16 @@ ship with this repo; when it is absent, fall back to the Phase 2 testing plan an
 substitution.
 
 Record results to `<Designs Directory>/test-results/BUILD-XXXX-results.md` with the exact
-commands, pasted raw output, exit codes, and the branch HEAD SHA they ran against.
+commands, pasted raw output, exit codes, and the state they ran against: a `Base: <sha>` line
+for the branch HEAD and a `Tree: <tree id>` line for the uncommitted change, computed as
+Phase 6 step 3 shows.
 
-## Phase 6: Commit (no push)
+## Phase 6: Hand-off state (no commit, no push)
 
-This skill **commits, but never pushes**. The commit is what lets `/tech-review` and
-`/tech-test` see the work — both build a disposable worktree from the branch ref, which
-sees committed history only, not staged or unstaged changes. Pushing to the fork and
-opening the PR belong to `/create-pr`, which runs later.
+This skill **never commits and never pushes** (`AGENTS.md` › Commit policy). The change
+stays uncommitted in `$WT`, on the story branch. `/tech-review` and `/tech-test` carry the
+uncommitted work into their own disposable worktrees, and `/create-pr` stages it, commits
+it signed, brings the branch up to date with `origin/main`, and pushes it to the fork.
 
 1. Confirm the worktree is on the story branch — never re-create it here:
 
@@ -409,56 +412,43 @@ opening the PR belong to `/create-pr`, which runs later.
 git -C "$WT" branch --show-current        # must equal BUILD-XXXX-<slug>
 ```
 
-2. Commit only your own paths **first** — you cannot rebase a worktree that still holds
-   uncommitted changes (`git rebase` aborts with "cannot rebase: You have unstaged
-   changes"). A shared index can hold another session's staged files, and a bare
-   `git add .` would sweep them into your commit:
+2. List what the hand-over holds, and check every path is yours. A path you did not
+   write, or one for a different BUILD key, is named in the banner rather than left for
+   `/create-pr` to sweep in:
 
 ```bash
-git -C "$WT" commit --only -s -S -m "[BUILD-XXXX] <type>: <subject>" -- buildconfig/converter.go buildconfig/converter_test.go
+git -C "$WT" status --short
 ```
 
-   List every path literally, including the docs `/tech-document` handed back in Phase 3 (its
-   Docs record names them; they are unstaged in `$WT`). zsh does not word-split a variable,
-   so a path list held in one shell variable arrives as a single argument and fails.
+   Include the docs `/tech-document` handed back in Phase 3 (its Docs record names them;
+   they are unstaged in `$WT`).
 
-   Convention: `[BUILD-XXXX] <type>: <subject>`, where type is `feat`, `fix`, `test`,
-   `docs`, or `chore`. `-s` adds the DCO sign-off (required by `AGENTS.md`). `-S` GPG-signs;
-   if this machine has no signing key configured, drop `-S` and keep `-s`. End the message
-   body with the trailer `Co-Authored-By: Claude` — **no email address** (a bare marker; it
-   is deliberately not GitHub's attributed-co-author form). Write the message with
-   `plain-words`. Before every commit, confirm the message's issue key equals the branch's issue
-   key.
+3. Record the tree id of the change, the fingerprint the Definition-of-Done gate and
+   `/tech-review` compare against. It is computed with a throwaway index, so the real
+   index in `$WT` is not touched. Run it from a script file under worktree isolation:
 
-   This is the final commit message. `/create-pr` preserves it rather than rewriting it, so
-   spend the effort here. Later review passes may amend this commit with fixes (that is
-   `/tech-review`'s concern, out of scope here).
+```bash
+IDX="$(mktemp -d)/index"
+GIT_INDEX_FILE="$IDX" git -C "$WT" read-tree HEAD
+GIT_INDEX_FILE="$IDX" git -C "$WT" add --all
+GIT_INDEX_FILE="$IDX" git -C "$WT" write-tree        # the tree id
+git -C "$WT" rev-parse HEAD                           # the base commit
+rm -f "$IDX"
+```
 
-3. Rebase onto fetched `origin/main`, inside the worktree, then re-run the tests and record
-   the fresh HEAD SHA into the results file (Phase 5) so the Definition-of-Done SHA gate
-   matches the post-rebase tip:
+   Write both into the results file next to the test output (Phase 5). The tree id changes
+   whenever any file in the change does, so a results file that names an older tree id
+   vouches for code that is no longer there.
+
+4. Check freshness without changing anything:
 
 ```bash
 git -C "$WT" fetch origin --quiet
-git -C "$WT" rebase origin/main
+git -C "$WT" rev-list --count HEAD..origin/main     # >0 means main moved since the worktree was made
 ```
 
-   For a stacked branch, restack on the parent's **current** tip — a stale stack silently
-   drops the parent's later fixes.
-
-   If the rebase reports conflicts, **stop**. Do not leave a worktree that holds conflict
-   markers. Either resolve them and `git -C "$WT" rebase --continue`, or
-   `git -C "$WT" rebase --abort` and surface the conflict to the user for a decision.
-
-4. Verify what actually landed, on which branch:
-
-```bash
-git -C "$WT" show --name-only --format='' HEAD
-git -C "$WT" branch --show-current
-```
-
-   Do **not** push. The branch stays local until `/create-pr` pushes it to the fork. That
-   keeps the work in one place rather than pushing here and force-pushing again after review.
+   A moved `main` is reported in the banner. `/create-pr` rebases after it commits and
+   re-runs the tests before its first push, so this skill does not rebase.
 
 ## Phase 7: Record the Outcome
 
@@ -472,24 +462,25 @@ Whether you may claim the work is *tested* is gated on evidence, independent of 
 
 - Claim it tested only if `<Designs Directory>/test-results/BUILD-XXXX-results.md` exists and
   contains (a) the exact test commands, (b) pasted raw output, (c) exit code 0, (d) the
-  branch HEAD SHA tested, and — for cluster-observable behaviour — (e) cluster evidence
+  `Tree:` line for the state tested, and — for cluster-observable behaviour — (e) cluster evidence
   such as `oc` output or BuildRun status.
-- Compare the SHA recorded in the results file against the current tip, and fail the gate
-  when they differ — a stale results file must not vouch for an untested commit:
+- Compare the tree id recorded in the results file against the tree id of the change as
+  it stands now (Phase 6 step 3), and fail the gate when they differ — a stale results file
+  must not vouch for untested code:
 
 ```bash
-recorded="$(grep -oiE '[0-9a-f]{7,40}' "<Designs Directory>/test-results/BUILD-XXXX-results.md" | tail -1)"
-current="$(git -C "$WT" rev-parse HEAD)"
-[ -n "$recorded" ] && [ "$current" = "$recorded" ] || { echo "results file SHA ($recorded) != current tip ($current) — treat as untested"; }
+recorded="$(grep -E '^Tree: [0-9a-f]{40}$' "<Designs Directory>/test-results/BUILD-XXXX-results.md" | tail -1 | sed -E 's/^Tree: //')"
+current="<the tree id Phase 6 step 3 printed>"
+[ -n "$recorded" ] && [ "$current" = "$recorded" ] || { echo "results file tree ($recorded) != current tree ($current) — treat as untested"; }
 ```
 
-- If any element above is missing, or the SHAs differ, say "implemented, evidence pending"
+- If any element above is missing, or the tree ids differ, say "implemented, evidence pending"
   in the summary and set the Completion Status to **DONE_WITH_CONCERNS**, not **DONE**.
 - Never claim tested on the strength of a narrative.
 - **`documentation` and `spike` work has no automated tests.** Its evidence is a manual-review
   record in the same results file: what was changed, how it was verified (the command run, the
-  rendered output eyeballed, the reference checked), and the branch HEAD SHA. That record, with
-  a matching SHA, satisfies the gate for these classifications; a test command and exit code
+  rendered output eyeballed, the reference checked), and the `Tree:` line. That record, with
+  a matching tree id, satisfies the gate for these classifications; a test command and exit code
   are not required.
 
 ### Summary banner
@@ -500,16 +491,16 @@ Draft the banner with `plain-words` before printing it.
 IMPLEMENTATION COMPLETE: BUILD-XXXX
 ====================================
 Repos modified:
-  - <repo>: BUILD-XXXX-<slug> (committed locally, not pushed)
+  - <repo>: BUILD-XXXX-<slug> (changes uncommitted in <worktree>, not pushed)
 
 Tests:
-  - Unit:    X/Y passed — results: test-results/BUILD-XXXX-results.md @ <HEAD SHA>
+  - Unit:    X/Y passed — results: test-results/BUILD-XXXX-results.md @ tree <tree id>
   - Cluster: <PASS/FAIL/N-A> — evidence: <section of the results file>
 
 Docs:    <n files updated: README.md, docs/support-matrix.md | none affected> — record: test-results/BUILD-XXXX-results.md § Docs
 
 Jira:    not touched by this skill — /create-pr updates it
-PR:      not created yet — run /create-pr
+PR:      not created yet — run /create-pr, which commits and pushes
 ```
 
 A banner claim without a matching results file is prohibited. Any test name cited must exist
@@ -525,18 +516,21 @@ unverified. Do not run any `jira` write command; `/create-pr` owns the Jira upda
 
 ## Phase 8: Hand off to review
 
-This skill neither pushes nor opens a PR. Once the commit and the Definition-of-Done gate
-are in place, **ask the user whether to run `/tech-review BUILD-XXXX`** before going further.
+This skill neither commits, pushes nor opens a PR. Once the hand-off state and the
+Definition-of-Done gate are in place, **ask the user whether to run `/tech-review BUILD-XXXX`** before going further.
 Do not run it automatically.
 
 The rest of the chain is separate, user-invoked steps:
 
-- `/tech-review BUILD-XXXX` — the pre-PR review gate (may amend the commit with fixes).
+- `/tech-review BUILD-XXXX` — the pre-PR review gate (`--fix` hands back a patch to apply,
+  uncommitted, in the worktree).
 - `/tech-test BUILD-XXXX` — the classification-driven unit and cluster tests.
-- `/create-pr BUILD-XXXX` — pushes the branch to the fork, opens the PR, and updates Jira.
+- `/create-pr BUILD-XXXX` — commits the change, pushes the branch to the fork, opens the
+  PR, and updates Jira.
 
-`/create-pr` is what pushes and touches the tracker, so this skill's job ends at a
-committed, tested, review-ready branch plus the offer to run `/tech-review`.
+`/create-pr` is what commits, pushes and touches the tracker, so this skill's job ends at a
+tested, review-ready change, uncommitted on the story branch, plus the offer to run
+`/tech-review`.
 
 ## Compliance Report (MANDATORY — always emit, even on early exit)
 
@@ -546,11 +540,11 @@ committed, tested, review-ready branch plus the offer to run `/tech-review`.
 | 0 branch precondition | ✅ / ❌ | `for-each-ref` output |
 | 0 worktree isolation | ✅ / ❌ | worktree path |
 | 3 implement + unit tests | ✅ / ❌ | results file path |
-| 3 docs (`/tech-document`) | ✅ updated / ✅ NONE AFFECTED / ❌ | Docs record in the results file; files named in the commit |
+| 3 docs (`/tech-document`) | ✅ updated / ✅ NONE AFFECTED / ❌ | Docs record in the results file; files named in the hand-off |
 | 4 review | ✅ / ⏭️ SKIPPED (reason) | |
 | 5 /tech-test | ✅ / ⏭️ SKIPPED (reason) | |
-| 6 commit + rebase (no push) | ✅ / ❌ | ahead/behind vs origin/main; `show --name-only` output |
-| 7 Definition-of-Done gate | ✅ / ❌ | results-file SHA vs current tip |
+| 6 hand-off state (no commit, no push) | ✅ / ❌ | `status --short` output; tree id; behind count vs origin/main |
+| 7 Definition-of-Done gate | ✅ / ❌ | results-file tree id vs current tree id |
 | 8 handoff (offer /tech-review) | ✅ / ❌ | asked the user |
 
 The banner may not be printed while any row is ❌ or unexplained.
@@ -558,7 +552,7 @@ The banner may not be printed while any row is ❌ or unexplained.
 ## Completion Status
 
 End with one of:
-- **DONE** — implemented, tested with evidence, committed locally, review-ready (push, PR, and Jira are `/create-pr`'s)
+- **DONE** — implemented, tested with evidence, left uncommitted in the worktree, review-ready (commit, push, PR, and Jira are `/create-pr`'s)
 - **DONE_WITH_CONCERNS** — complete but with gaps; list them (e.g. cluster evidence pending)
 - **BLOCKED** — cannot proceed; state what is missing
 - **NEEDS_CONTEXT** — needs user or team input on specific questions

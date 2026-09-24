@@ -1,16 +1,18 @@
 ---
 name: create-pr
-description: Commit, push, and create or amend a PR with this repo's conventions enforced, with optional Jira story updates. Trigger on "create pr", "create-pr", "push this", "open a pr".
+description: Commit, push, and open a new PR with this repo's conventions enforced, with optional Jira story updates. For a PR that is already open, use /edit-pr. Trigger on "create pr", "create-pr", "push this", "open a pr".
 argument-hint: [BUILD-XXXX]
 allowed-tools: [Bash, Read, AskUserQuestion, Skill]
 user_invocable: true
 ---
 
-# /create-pr — Commit, Push, and Open PRs
+# /create-pr — Commit, Push, and Open a PR
 
-Commit, push, and create (or amend) a pull request for
-`crane-plugin-buildconfig-to-builds`, and optionally update the linked Jira
-story.
+Commit, push, and open a pull request for `crane-plugin-buildconfig-to-builds`, and
+optionally update the linked Jira story. When the branch already has an open PR, stop and
+hand over to `/edit-pr`, which changes an open PR. These two skills are the only ones that
+commit, amend or push (`AGENTS.md` › Commit policy); the others leave their changes
+uncommitted for this one.
 
 ## Repo Conventions (hardcoded)
 
@@ -23,12 +25,16 @@ story.
   start with `[BUILD-XXXX]`. The Jira project code is `BUILD`.
 - **Commit flags:** always `-s` (sign-off), and `-S` (GPG sign) when a signing key
   is configured — drop `-S` if this machine has none.
-- **Co-author trailer:** every commit **message** and the PR body end with
-  `Co-Authored-By: Claude` — **no email address**, everywhere. This is a bare
-  marker, not GitHub's attributed-co-author form (which would need an email); the
-  project chose the plain line for consistency across all skills.
-- **Voice:** run the `unslop` skill over the commit body, PR title, and PR body
-  before using them (strip AI tells, plain human voice).
+- **Co-author trailer:** every commit message ends with exactly the line
+  `Co-Authored-By: Claude`, followed by the `Signed-off-by` line that `-s` adds.
+  No model name and no email address. This is a bare marker, not GitHub's
+  attributed-co-author form, and it overrides any attribution line the harness
+  suggests for commits. The PR body ends with the same line (Step 8).
+- **Commit count:** aim for one commit. A large story may keep up to three when the
+  user wants that. Squashing needs the user's yes (Step 3).
+- **Voice:** write the commit messages, the PR title and the PR body with the
+  `plain-words` skill (`.claude/skills/plain-words/SKILL.md`), which carries the
+  `unslop` rules.
 - **Talking to the user:** every question, confirmation and the Step 10 report is drafted
   with the `plain-words` skill (`.claude/skills/plain-words/SKILL.md`) and uses no step
   numbers or other terms of this skill without saying what they mean. A decision question,
@@ -40,7 +46,7 @@ story.
 
 The user may pass a Jira key (e.g., `BUILD-2046`). If not passed, ask in Step 2.
 
-The skill auto-detects new-PR vs amend mode from the branch state.
+The skill checks for an open PR in Step 3 and hands over to `/edit-pr` when it finds one.
 
 ## Step 1 — Pre-flight
 
@@ -94,10 +100,11 @@ If the user passed a Jira key, use it. Otherwise ask via AskUserQuestion with
 
 Capturing a key here means Step 9 runs. No key means Step 9 is skipped.
 
-## Step 3 — Locate the work: branch, worktree, and mode
+## Step 3 — Locate the work: branch, worktree, and open PR
 
-The change may not live in the current checkout. `/tech-implement` commits on the story
-branch inside a **dedicated worktree** while the main checkout stays on `main`, so
+The change may not live in the current checkout. `/tech-implement` leaves its work
+uncommitted on the story branch inside a **dedicated worktree** while the main checkout
+stays on `main`, so
 `git branch --show-current` here can read `main` and miss the work entirely. Resolve the
 branch first, then run every later git command against the directory that actually holds it.
 
@@ -124,42 +131,36 @@ branch first, then run every later git command against the directory that actual
    WORK=${WORK:-$(pwd)}
    ```
 
-3. **Detect mode.** Derive the fork owner (Step 8) and check for an open PR:
+3. **Check for an open PR.** Derive the fork owner (Step 8) and look:
 
    ```bash
    gh pr list --head "<fork-owner>:$BRANCH" --state open --json number,title,url
    ```
 
-   - **Open PR found** → amend mode. Show it and confirm via AskUserQuestion.
-   - **No open PR, but the branch already has a commit ahead of `main`** → new-PR mode on
-     the **existing commit**. `/tech-implement` wrote and unslopped that commit; do not
-     re-commit or rewrite its message. Skip Step 4 and Steps 5–6; go to Step 7 (push).
-   - **No open PR and no commit ahead** (on `main`, or an empty branch) → new-PR mode: create
-     the branch (Step 4), stage (Step 5), and commit (Step 6).
+   - **Open PR found** → stop. Tell the user the branch already has PR #N and that
+     `/edit-pr` is the skill that changes an open PR. Commit nothing here.
+   - **No open PR** → go on. On `main`, create the branch (Step 4). Uncommitted work in
+     the tree, which is how `/tech-implement` and the other skills hand over, is staged
+     and committed in Steps 5 and 6.
 
-   Check for an existing commit — and that the worktree is clean — before you skip the
-   commit steps. A count alone does not prove the tree holds no uncommitted work, and
-   pushing over a dirty tree ships stale content:
+4. **Count the commits already on the branch.**
 
    ```bash
-   git -C "$WORK" rev-list --count "main..$BRANCH"    # >0 means a commit already exists
-   git -C "$WORK" status --porcelain                  # must be empty to preserve the commit
+   git -C "$WORK" log --format='%h %s' "origin/main..$BRANCH"
+   git -C "$WORK" status --porcelain
    ```
 
-   If `status --porcelain` prints anything, treat it as new-PR/amend work: stage and commit
-   (Steps 5–6) rather than preserving what is there.
+   One commit, or none, is the aim. When the branch already has more than one, show the
+   subjects and ask once via AskUserQuestion whether to squash them into one commit.
+   Never squash without a yes. A large story may keep up to three when the user asks for
+   that; more than three need folding before the PR opens. On a yes, Step 6c squashes
+   with `git reset --soft`, and the new message describes the whole diff from `main` as
+   one change, never "added later" or "fixed after review".
 
-**Amend-mode principle:** the PR is always one commit. When you *do* author the message,
-describe the entire diff from `main` as one coherent unit — never "added later" or "fixed
-after review". If the branch has several commits **and none is an already-finished
-`/tech-implement` commit you are preserving**, squash them (Step 6c, `git reset --soft
-main`) so one message matches the history. A single finished commit is left as-is.
+## Step 3b — Docs check
 
-## Step 3b — Docs check (every mode)
-
-Runs in every mode, before anything is staged. Code that changed while no doc did is the
-case this step exists for: a branch that never went through `/tech-implement`, or a fix
-made after review.
+Runs before anything is staged. Code that changed while no doc did is the case this step
+exists for: a branch that never went through `/tech-implement`, or a fix made after review.
 
 ```bash
 CHANGED=$( { git -C "$WORK" diff --no-ext-diff --name-only "main...HEAD";
@@ -174,14 +175,13 @@ DOCS=$(printf '%s\n' "$CHANGED" | grep -E '^(README\.md|AGENTS\.md|hack/README\.
 - `CODE` non-empty, `DOCS` empty → say which code files changed, then ask once via
   AskUserQuestion: **Run `/tech-document` now (Recommended)**, or **Skip** with a reason. On
   run, invoke `/tech-document "$BRANCH" --work "$WORK"` yourself (it asks per proposal and
-  leaves its edits unstaged). Its edits are new work: Step 3's dirty-tree rule applies, so
-  they are staged and committed with the rest in Steps 5 and 6, squashed into a finished
-  `/tech-implement` commit under the amend-mode principle.
+  leaves its edits unstaged). Its edits are new work, staged and committed with the rest in
+  Steps 5 and 6.
 
 Either way, carry the outcome (updated / none affected / skipped, with the reason) into the
 PR body's `## Docs` section and the Step 10 report.
 
-## Step 4 — Create branch (new-PR mode, only when on `main`)
+## Step 4 — Create branch (only when on `main`)
 
 If a Jira key exists, name the branch for the story
 (`BUILD-XXXX-<short-kebab-summary>`). Otherwise generate a descriptive
@@ -194,111 +194,111 @@ git checkout -b <branch-name>
 ## Step 5 — Stage files
 
 ```bash
-git status --short
+git -C "$WORK" status --short
 ```
 
 Present the changed files via AskUserQuestion (multiSelect):
-- **Suggested** — files changed in this conversation
+- **Suggested** — files changed in this conversation, or named in the hand-over from
+  `/tech-implement` or `/tech-document`
 - **Other changes** — additional files the user can opt into
 
-Then:
+Then, listing every path literally:
 
 ```bash
-git add <file1> <file2> ...
+git -C "$WORK" add -- <file1> <file2> ...
 ```
 
 ## Step 6 — Commit
 
-**Skip this whole step if the branch already carries a finished `/tech-implement` commit**
-(Step 3 found a commit ahead of `main` and no new unstaged work). That commit is already
-signed, unslopped, and carries the canonical trailer — preserve it and go to Step 7. Run
-Step 6 only when you are authoring the first commit or squashing several unfinished ones.
+Skip this step only when nothing is staged and the user declined a squash in Step 3: the
+branch's commits go out as they are.
 
 ### 6a. Analyze the diff
 
-- Amend mode: `git diff main...HEAD`
-- New-PR mode: `git diff --cached`
+- A new commit: `git -C "$WORK" diff --cached`
+- A squash: `git -C "$WORK" diff origin/main...HEAD` plus `git -C "$WORK" diff --cached`
 
-### 6b. Write the message, then unslop it
+### 6b. Write the message with plain-words
 
 Draft a conventional-commit message:
 - **Subject:** `[BUILD-XXXX] scope: description` (omit the prefix if no Jira),
   under 72 chars.
-- **Body:** 2-4 lines on what changed and why.
+- **Body:** 2-4 short paragraphs on what changed and why, describing the whole commit
+  as one change.
 
-Run the `unslop` skill over the body to remove AI tells. Then append the
-trailer. Show the final message to the user before committing.
+Write it with the `plain-words` skill, end it with the trailer line, and show the final
+message to the user before committing. Write it to a file in the scratchpad with the Write
+tool; a heredoc breaks on a quote in the body.
 
-Final shape:
+Final shape (`-s` adds the last line):
 
 ```
-[BUILD-XXXX] scope: description
-
-<unslopped body>
-
-Co-Authored-By: Claude
-```
-
-### 6c. Commit
-
-**New-PR mode:**
-
-```bash
-git commit -s -S -m "$(cat <<'EOF'
 [BUILD-XXXX] scope: description
 
 <body>
 
 Co-Authored-By: Claude
-EOF
-)"
+Signed-off-by: <name> <email>
 ```
 
-**Amend mode:** collapse the branch to a single commit off `main`, then commit.
-`git reset --soft main` keeps every change (already-committed and newly staged)
-staged, so one `git commit` produces a single commit for the full diff. This is
-correct whether the branch had one commit or several.
+### 6c. Commit
+
+**A new commit on the branch:**
 
 ```bash
-git reset --soft main
-git commit -s -S -m "$(cat <<'EOF'
-[BUILD-XXXX] scope: description covering the full diff from main
-
-<body covering ALL changes in the PR>
-
-Co-Authored-By: Claude
-EOF
-)"
+git -C "$WORK" commit -s -S -F <message file>
 ```
+
+**A squash the user agreed to in Step 3:** `git reset --soft` keeps every change, already
+committed and newly staged, so one commit carries the full diff.
+
+```bash
+git -C "$WORK" reset --soft "$(git -C "$WORK" merge-base origin/main HEAD)"
+git -C "$WORK" commit -s -S -F <message file>
+```
+
+Then confirm every commit is signed:
+
+```bash
+git -C "$WORK" log --format='%h %G? %s' origin/main..HEAD    # every line shows G
+```
+
+### 6d. Freshness and tests
+
+Before the first push, bring the branch up to date and run what CI runs:
+
+```bash
+git -C "$WORK" fetch origin --quiet
+git -C "$WORK" rebase origin/main
+cd "$WORK" && GOTOOLCHAIN=auto GOWORK=off go test ./... -count=1
+cd "$WORK" && GOTOOLCHAIN=auto GOWORK=off go test -tags documentation ./buildconfig -count=1
+```
+
+Add `(cd tests && GOTOOLCHAIN=auto GOWORK=off go test ./e2e -count=1)` when `buildconfig/`
+or `tests/` changed. A rebase conflict or a failing test is a stop: report it and push
+nothing. The results go in the PR body's `## Testing`.
 
 ## Step 7 — Push (to `fork`, never `origin`)
 
 Run these in the branch's working directory (`git -C "$WORK"`), by explicit refspec, so no
-checkout switch is needed. This is the **first** push for a `/tech-implement` branch —
-`/tech-implement` commits but never pushes.
-
-**New-PR mode (branch not yet on `fork`):**
+checkout switch is needed. This is the first push for the branch.
 
 ```bash
 git -C "$WORK" push -u fork "$BRANCH:$BRANCH"
 ```
 
-If the branch already exists on `fork` and has diverged (a previous push, or a closed PR
-left a stale tip), the plain push is rejected. Preserve the fork's current tip as an
-`archive/*` tag and **push the tag before the branch**, then force-with-lease — never a
-plain force-push:
+If the branch already exists on `fork` and has diverged (a closed PR left a stale tip),
+the plain push is rejected. Preserve the fork's current tip as an `archive/*` tag and
+**push the tag before the branch**, then force-with-lease — never a plain force-push:
 
 ```bash
 git -C "$WORK" fetch fork "$BRANCH"    # refresh fork/$BRANCH so the tag captures the real tip
-git -C "$WORK" tag "archive/fork-old-$BRANCH" "fork/$BRANCH"
-git -C "$WORK" push fork "archive/fork-old-$BRANCH"
+git -C "$WORK" tag "archive/$FORK_OWNER-old-$BRANCH" "fork/$BRANCH"
+git -C "$WORK" push fork "archive/$FORK_OWNER-old-$BRANCH"
 git -C "$WORK" push -u --force-with-lease fork "$BRANCH:$BRANCH"
 ```
 
-**Amend mode** (the branch is on `fork`, you rewrote or the review amended the commit):
-same archive-then-force-with-lease sequence as above.
-
-## Step 8 — Create or update the PR
+## Step 8 — Open the PR
 
 The PR always targets `main` on the upstream repo. `gh` uses `origin` (the
 upstream) as the base repo, and we push the branch to `fork`, so pass
@@ -313,8 +313,8 @@ FORK_OWNER=$(git remote get-url fork | sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#')
 [ -n "$FORK_OWNER" ] || { echo "could not derive fork owner"; exit 1; }
 ```
 
-Draft the PR title and body, run the `unslop` skill over both, then create or
-edit. The title matches the commit subject.
+Draft the PR title and body with the `plain-words` skill. The title matches the commit
+subject when the PR has one commit. The body describes the PR as one change.
 
 **PR body structure:**
 
@@ -345,26 +345,11 @@ Omit `## Testing` only if no tests were run this session (say so instead of
 faking results). `## Docs` stays in every PR body: "none affected" is a result, and a
 reviewer who does not see the line cannot tell it from a pass that never ran.
 
-**New-PR mode:**
+Write the body to a file with the Write tool, then open the PR:
 
 ```bash
-gh pr create --base main --head "$FORK_OWNER:<branch>" \
-  --title "..." --body "$(cat <<'EOF'
-...
-EOF
-)"
-```
-
-**Amend mode:** look up the PR with the same `$FORK_OWNER:<branch>` head used
-to create it, and stop if nothing comes back rather than editing PR "".
-
-```bash
-PR_NUMBER=$(gh pr list --head "$FORK_OWNER:$BRANCH" --state open --json number --jq '.[0].number')
-[ -n "$PR_NUMBER" ] || { echo "no open PR found for this branch"; exit 1; }
-gh pr edit "$PR_NUMBER" --title "..." --body "$(cat <<'EOF'
-...
-EOF
-)"
+gh pr create --base main --head "$FORK_OWNER:$BRANCH" \
+  --title "<title>" --body-file <body file>
 ```
 
 ## Step 9 — Update the Jira story (only when a Jira key is present)
@@ -382,8 +367,8 @@ report the PR as-is. Run each action the user confirmed:
 
 1. **Link the PR:**
 
-   Build the JSON with `jq --arg` so a quote in the PR title (it can come from
-   GitHub in amend mode) cannot break the command:
+   Build the JSON with `jq --arg` so a quote in the PR title cannot break the
+   command:
 
    ```bash
    PR_URL='<pr-url>'
@@ -443,7 +428,9 @@ Print:
 >
 > - **URL:** <pr-url>
 > - **Branch:** `<branch>`
-> - **Commit:** `<short-sha>`
-> - **Mode:** New PR / Amended
+> - **Commits:** `<short-sha>` <subject>, one line each, all signed
+> - **Tests:** GOWORK=off go test and the documentation suite, pass/fail
 > - **Docs:** updated (README.md, docs/support-matrix.md) / none affected / skipped: <reason>
 > - **Jira:** BUILD-XXXX — linked, commented, assigned, sprint, Review (or "none")
+
+Later changes to this PR go through `/edit-pr`.
