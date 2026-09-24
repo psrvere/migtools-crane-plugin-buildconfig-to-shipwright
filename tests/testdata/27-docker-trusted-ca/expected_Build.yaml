@@ -4,7 +4,7 @@ metadata:
   annotations:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     crane.konveyor.io/conversion-warnings: |-
-      [myapp/webapp-ca] mountTrustedCA for BuildConfig webapp-ca relies on the OpenShift Cluster Network Operator injecting the cluster CA bundle into ConfigMap "webapp-ca-trusted-ca" (label config.openshift.io/inject-trusted-cabundle); on clusters without that injector the ca-bundle.crt key stays absent and BuildRun pods will fail to mount the "trusted-ca" volume until the key is populated manually. The volume itself reached the shipped buildah and source-to-image ClusterBuildStrategies in strategy-catalog commit cb2432c, so check the target declares it before you apply: oc get clusterbuildstrategy buildah -o jsonpath='{.spec.volumes[*].name}'. A catalog older than cb2432c declares no such volume and Shipwright refuses to register the Build (Registered=False, reason UndefinedVolume), whatever the strategy is called
+      [myapp/webapp-ca] mountTrustedCA for BuildConfig webapp-ca relies on the OpenShift Cluster Network Operator injecting the cluster CA bundle into ConfigMap "webapp-ca-trusted-ca-migrated" (label config.openshift.io/inject-trusted-cabundle); on clusters without that injector the ca-bundle.crt key stays absent and BuildRun pods will fail to mount the "trusted-ca" volume until the key is populated manually. The volume itself reached the shipped buildah and source-to-image ClusterBuildStrategies in strategy-catalog commit cb2432c, so check the target declares it before you apply: oc get clusterbuildstrategy buildah -o jsonpath='{.spec.volumes[*].name}'. A catalog older than cb2432c declares no such volume and Shipwright refuses to register the Build (Registered=False, reason UndefinedVolume), whatever the strategy is called
       [myapp/webapp-ca] No explicit pushSecret found for DockerImage output. Set spec.output.pushSecret to a registry credential secret, or ensure the BuildRun ServiceAccount carries credentials for the target registry; otherwise the push will fail.
     crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/webapp-ca
   labels:
@@ -32,5 +32,5 @@ spec:
       items:
       - key: ca-bundle.crt
         path: ca-bundle.crt
-      name: webapp-ca-trusted-ca
+      name: webapp-ca-trusted-ca-migrated
     name: trusted-ca

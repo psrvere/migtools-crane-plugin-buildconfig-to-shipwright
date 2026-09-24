@@ -21,7 +21,7 @@ For every resource in a crane export:
   the source repository before running the Build. On a Source strategy an inline Dockerfile
   is dropped with a warning, because S2I does not use one. A BuildConfig that sets
   `spec.mountTrustedCA: true` gets a `trusted-ca` volume on the Build and a third generated
-  resource, a `ConfigMap` named after the BuildConfig plus `-trusted-ca` and labelled
+  resource, a `ConfigMap` named after the BuildConfig plus `-trusted-ca-migrated` and labelled
   `config.openshift.io/inject-trusted-cabundle`, which the Cluster Network Operator fills
   with the cluster's CA bundle.
 - A BuildConfig with a Custom or JenkinsPipeline strategy, or no output image, is skipped:
@@ -163,7 +163,7 @@ output/
     Build_shipwright.io_v1beta1_myapp_webapp.yaml
     ServiceAccount__v1_myapp_webapp.yaml         # when a pull secret is used and no ServiceAccount is named
     ConfigMap__v1_myapp_webapp-dockerfile.yaml   # when the BuildConfig has an inline Dockerfile
-    ConfigMap__v1_myapp_webapp-trusted-ca.yaml   # when the BuildConfig sets mountTrustedCA
+    ConfigMap__v1_myapp_webapp-trusted-ca-migrated.yaml   # when the BuildConfig sets mountTrustedCA
 ```
 
 Read each Build's `crane.konveyor.io/conversion-warnings` annotation before applying it.

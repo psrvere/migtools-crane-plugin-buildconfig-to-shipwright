@@ -48,7 +48,13 @@ parameter names; this is the same trade for a volume name.
   visible.
 - The ConfigMap name comes from the BuildConfig through `uniqueName`, like the Build, the
   generated ServiceAccount and the inline-Dockerfile ConfigMap. One per conversion, never a
-  shared well-known name that an `oc apply` of the output would relabel for CA injection.
+  shared well-known name that an `oc apply` of the output would relabel for CA injection. The
+  suffix is `-trusted-ca-migrated`, not the shorter `-trusted-ca`, because the plugin runs
+  once per resource and cannot see whether the export already has a ConfigMap of that name;
+  crane's own dedup keeps only the last Kind/namespace/name collision and drops the other
+  silently. A generated ConfigMap winning that collision would carry the CNO's
+  inject-trusted-cabundle label onto a ConfigMap the user owns, and the operator would
+  then overwrite its data — a name this specific makes that realistically impossible.
 - A strategy the plugin cannot vouch for warns; it never refuses the conversion (rule 15 in
   [architecture.md](../architecture.md)).
 

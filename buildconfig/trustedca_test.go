@@ -184,6 +184,90 @@ func TestConvertMountTrustedCAVolumeNameCollision(t *testing.T) {
 	if !sawSkip {
 		t.Error("expected warn-and-skip message for trusted-ca volume name collision")
 	}
+
+	// processStrategyVolumes converts the explicit "trusted-ca" volume before
+	// the mapping ever sees it and defers, so it is the one that warns about
+	// declaring the volume in the target strategy. The generic per-volume and
+	// summary remediation ("add an overridable volume ..." / "does not
+	// declare them") is wrong for this name on strategy-catalog cb2432c+,
+	// which already ships it — the catalog-version check must run instead,
+	// and it must not be followed by the summary warning, since this is the
+	// only volume on the BuildConfig.
+	var sawCatalogCheck, sawGenericPerVolume, sawGenericSummary bool
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "already declare an overridable volume by this name") && strings.Contains(entry.Message, "cb2432c") {
+			sawCatalogCheck = true
+		}
+		if strings.Contains(entry.Message, "add an overridable volume named") {
+			sawGenericPerVolume = true
+		}
+		if strings.Contains(entry.Message, "does not declare them") {
+			sawGenericSummary = true
+		}
+	}
+	if !sawCatalogCheck {
+		t.Error("expected the catalog-version check warning for the explicit trusted-ca volume")
+	}
+	if sawGenericPerVolume {
+		t.Error("did not expect the generic per-volume remediation warning (W25) for a volume named trusted-ca")
+	}
+	if sawGenericSummary {
+		t.Error("did not expect the generic strategy-does-not-declare-them summary warning (W26) when the only converted volume is trusted-ca")
+	}
+}
+
+// A strategy volume literally named "trusted-ca" goes through
+// processStrategyVolumes whether or not mountTrustedCA is set — the
+// collision check in processMountTrustedCA only ever sees this volume after
+// processStrategyVolumes has already converted it. This proves the
+// catalog-version check warning fires, and the misleading generic
+// remediation does not, even with mountTrustedCA absent entirely, so the
+// fix does not depend on the mapping having run first.
+func TestConvertStrategyVolumeNamedTrustedCAWithoutMountTrustedCA(t *testing.T) {
+	logger, hook := logrustest.NewNullLogger()
+	plugin := &BuildConfigTransformPlugin{Log: logger}
+	resp, err := plugin.Run(trustedCABuildConfigRequest("Docker", "dockerStrategy", false, []interface{}{
+		map[string]interface{}{
+			"name":   TrustedCAVolumeName,
+			"source": map[string]interface{}{"type": "Secret", "secret": map[string]interface{}{"secretName": "my-own-ca-secret"}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b := decodeBuild(t, resp)
+	if len(b.Spec.Volumes) != 1 || b.Spec.Volumes[0].Name != TrustedCAVolumeName {
+		t.Fatalf("expected 1 Build spec volume named %s, got %+v", TrustedCAVolumeName, b.Spec.Volumes)
+	}
+	if b.Spec.Volumes[0].Secret == nil || b.Spec.Volumes[0].Secret.SecretName != "my-own-ca-secret" {
+		t.Errorf("expected the explicit secret volume to be kept, got %+v", b.Spec.Volumes[0])
+	}
+	if cm := findConfigMap(resp, testTrustedCAConfigMapName); cm != nil {
+		t.Errorf("expected no generated trusted CA ConfigMap when mountTrustedCA is unset, got %+v", cm)
+	}
+
+	var sawCatalogCheck, sawGenericPerVolume, sawGenericSummary bool
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "already declare an overridable volume by this name") && strings.Contains(entry.Message, "cb2432c") {
+			sawCatalogCheck = true
+		}
+		if strings.Contains(entry.Message, "add an overridable volume named") {
+			sawGenericPerVolume = true
+		}
+		if strings.Contains(entry.Message, "does not declare them") {
+			sawGenericSummary = true
+		}
+	}
+	if !sawCatalogCheck {
+		t.Error("expected the catalog-version check warning for a strategy volume named trusted-ca, even without mountTrustedCA")
+	}
+	if sawGenericPerVolume {
+		t.Error("did not expect the generic per-volume remediation warning (W25) for a volume named trusted-ca")
+	}
+	if sawGenericSummary {
+		t.Error("did not expect the generic strategy-does-not-declare-them summary warning (W26) when the only converted volume is trusted-ca")
+	}
 }
 
 func TestConvertMountTrustedCACustomStrategyWarning(t *testing.T) {

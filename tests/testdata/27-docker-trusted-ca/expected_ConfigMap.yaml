@@ -5,5 +5,5 @@ metadata:
     crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/webapp-ca
   labels:
     config.openshift.io/inject-trusted-cabundle: "true"
-  name: webapp-ca-trusted-ca
+  name: webapp-ca-trusted-ca-migrated
   namespace: myapp
