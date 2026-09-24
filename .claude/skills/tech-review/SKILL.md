@@ -35,7 +35,8 @@ If the user asks to review an open PR, or someone else's PR, say so and point at
    reports; findings go to the terminal. The simplify pass (when the diff has Go) and
    `--fix` (on request) edit an isolated worktree of the branch created in Stage 0f — so the default path
    leaves the user's repo byte-for-byte unchanged, and rollback is `git worktree remove`.
-   Nothing is committed, pushed, or written to Jira.
+   Nothing is committed, pushed, or written to Jira; commits and pushes belong to
+   `/create-pr` and `/edit-pr` (`AGENTS.md` › Commit policy).
 3. **Baseline is fetched `origin/main`, never local `main`.** A stale local main
    misattributes already-merged work to the branch and produces false blockers.
 4. **Every `git diff` and `git show` uses `--no-ext-diff`.** The repo's external diff
@@ -197,8 +198,8 @@ touches, the findings may not survive a rebase — cap the verdict at
 This count is a point-in-time snapshot: `origin/main` can move during a long review (it
 did this session — 17 commits landed mid-run). This skill is report-only and never pushes,
 so a moved base does not corrupt anything here, but the verdict must say the check was
-taken at Stage 0. The caller that acts on the branch (`/tech-implement`) re-fetches and
-rebases before it amends or pushes, so it — not this skill — owns the final freshness gate.
+taken at Stage 0. `/create-pr` re-fetches and rebases before it first pushes, so it — not
+this skill — owns the final freshness gate.
 
 ### 0d. Probe the CLI reviewers
 
@@ -275,6 +276,37 @@ git worktree remove --force "$WT"
 rm -rf "$SCRATCH"
 ```
 
+### 0g. Carry the uncommitted work
+
+Work on a story branch usually sits uncommitted: `/tech-implement` and `/tech-document`
+leave it that way, and only `/create-pr` or `/edit-pr` commit it (`AGENTS.md` › Commit
+policy). A worktree made from the branch ref sees committed history only, so copy the
+uncommitted change into `$WT` before any stage reads it. Find the worktree that has the
+branch checked out:
+
+```bash
+SRC=$(git worktree list --porcelain | grep -B2 -x "branch refs/heads/$NAME" | grep '^worktree ' | sed -E 's/^worktree //')
+git -C "$SRC" status --porcelain
+```
+
+When `SRC` is empty (a fork-only branch) or its status prints nothing, there is nothing to
+carry; say so in the report. Otherwise run this from a script file, reading `SRC` and
+changing nothing in it:
+
+```bash
+git -C "$SRC" diff --no-ext-diff --binary HEAD > "$SCRATCH/uncommitted.patch"
+[ -s "$SCRATCH/uncommitted.patch" ] && git -C "$WT" apply --index "$SCRATCH/uncommitted.patch"
+(cd "$SRC" && git ls-files -z --others --exclude-standard | tar --null -T - -cf "$SCRATCH/untracked.tar")
+tar -xf "$SCRATCH/untracked.tar" -C "$WT"
+git -C "$WT" add --all
+git -C "$WT" write-tree        # the tree id of the change under review
+```
+
+The carried change is staged in `$WT`'s own index, so everything later stages add stays
+unstaged on top of it. Take the file list and changed-line count again from
+`git -C "$WT" diff --no-ext-diff --cached "$BASE"`; the 0b numbers cover commits only. The
+report's header names the tree id beside the branch.
+
 ---
 
 ## Stage 1: Evidence gate
@@ -288,6 +320,7 @@ Look for `<Designs Directory>/test-results/BUILD-XXXX-results.md`.
 | File absent | `EVIDENCE: none` — not a blocker on its own, but no clean `READY` |
 | Contains `PASS` with no pasted command output or exit code | Treat as absent. A claim is not evidence. |
 | Records a SHA that is not an ancestor of the branch head | `EVIDENCE: stale` — the code changed after it was tested |
+| 0g carried uncommitted work, and the file's `Tree:` line is missing or differs from 0g's tree id | `EVIDENCE: stale` — the uncommitted change moved after it was tested |
 | Jira status claims more than the evidence supports | Report the mismatch |
 
 ```bash
@@ -334,7 +367,8 @@ cd "$WT" && GOWORK=off go test ./... -count=1
 `GOWORK=off` is what CI builds. A failure means the pass broke the branch: discard its
 edits with `git -C "$WT" checkout -- .`, report that they were dropped and why, and
 continue to Stage 3 without them. The worktree makes this safe — it holds nothing but the
-branch and the pass's edits, so a blanket discard cannot touch anyone else's work.
+branch, the change 0g staged, and the pass's edits, and `checkout -- .` restores the index,
+so the staged change survives and a blanket discard cannot touch anyone else's work.
 
 ---
 
@@ -638,17 +672,21 @@ With `--fix`, edits still land in the worktree `$WT`, never the user's checkout:
 3. Apply only what was approved, in `$WT`.
 4. Re-run `cd "$WT" && GOWORK=off go test ./... -count=1`. If it fails, discard the last
    change in the worktree and report; never emit a patch that breaks the build.
-5. Emit the combined patch (the simplify pass + approved fixes) so the user or `/tech-implement`
-   can apply it to the real checkout:
+5. Emit the combined patch (the simplify pass + approved fixes). It is the diff against
+   `$WT`'s index, so it holds only this run's edits and not the branch or the change 0g
+   carried. The user applies it, uncommitted, in the branch's worktree with
+   `git apply <patch>`:
 
    ```bash
-   git -C "$WT" diff --no-ext-diff "$BASE" > "$SCRATCH/fixes.patch"
+   git -C "$WT" add --intent-to-add --all
+   git -C "$WT" diff --no-ext-diff --binary > "$SCRATCH/fixes.patch"
    ```
 
 6. Report what was applied and what was skipped.
 
-Do not commit and do not write to the user's checkout. Committing is the caller's step —
-`/tech-implement` owns the commit. The worktree is removed after the patch is emitted.
+Do not commit and do not write to the user's checkout. `/create-pr` commits the change
+when the branch has no PR yet, and `/edit-pr` when it has one. The worktree is removed
+after the patch is emitted; keep `$SCRATCH` until the user has applied the patch.
 
 ---
 

@@ -9,7 +9,8 @@ allowed-tools: [Bash, Read, Write, Edit, AskUserQuestion, Skill]
 
 You read one diff and answer one question for every documentation file in this repo: is it
 still true? Then you show what has to change, agree it with the user, and make the edit on
-the same branch as the code. The commit is the caller's; the words are yours.
+the same branch as the code. The commit belongs to `/create-pr` or `/edit-pr`; the words
+are yours.
 
 The failure this skill exists for is not an agent that cannot find a stale sentence when
 asked. It is that nobody asks. Docs in this repo were touched in ten of the last forty
@@ -34,7 +35,8 @@ The user invoked this with: $ARGUMENTS
 
 ## Iron rules
 
-1. **Never commit, push, create a branch, or write to Jira.** The caller owns those.
+1. **Never commit, push, create a branch, or write to Jira.** Commits and pushes belong to
+   `/create-pr` and `/edit-pr` (`AGENTS.md` › Commit policy); the rest is the caller's.
 2. **Edit only inside `$WORK`, and only files in the doc set below.** When `$WORK` is a
    caller's worktree, the user's checkout is never touched. `MEMORY.md` next to this file
    is the one exception: Stage 7b appends to it.
@@ -584,8 +586,9 @@ For each approved block, make the edit in `$WORK` and append its path to
    doc that has not landed is allowed only where PR #71 already does it: with a sentence
    saying which PR brings the file.
 
-3. Leave the edits unstaged and uncommitted. `/tech-implement` commits them with the code;
-   `/create-pr` stages them; a user running this by hand does what they like.
+3. Leave the edits unstaged and uncommitted, beside the code. `/create-pr` commits them
+   when the branch has no PR yet, and `/edit-pr` when it has one. A user running this by
+   hand hands over to whichever of the two fits.
 
 Remove `$SCRATCH` when the run ends, including on early exit. `$WORK` is the caller's and
 stays.

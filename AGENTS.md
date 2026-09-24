@@ -10,8 +10,8 @@ https://github.com/konveyor/enhancements/pull/300
 
 ## Development skills
 
-This repo ships nine Claude Code skills under `.claude/skills/` that take a Jira BUILD issue
-from triage to a merged pull request, plus a tenth, `plain-words`, that they all use for
+This repo ships ten Claude Code skills under `.claude/skills/` that take a Jira BUILD issue
+from triage to a merged pull request, plus an eleventh, `plain-words`, that they all use for
 text a person reads. [`development.md`](development.md) is the map: the
 workflow, what each skill needs and leaves behind, and a walkthrough. Each skill's full
 instructions live in its own `SKILL.md`.
@@ -268,7 +268,24 @@ git commit -s
 
 - `-s` adds the DCO `Signed-off-by` trailer.
 
-Write the commit message with the `plain-words` skill before committing, so it
-reads like a person wrote it. This holds for every commit, including the fixes an
+Only two skills create commits, amend them or push: `/create-pr`, which opens a PR, and
+`/edit-pr`, which changes an open one. Every other skill, and any agent working without a
+skill, leaves its changes uncommitted in the working tree and hands over to `/create-pr`
+when the branch has no PR yet, or to `/edit-pr` when it has one.
+
+Everything a person reads is written with the `plain-words` skill
+(`.claude/skills/plain-words/SKILL.md`). That covers every commit message, PR title and
+body, PR or review comment, thread reply and Jira comment, and anything a skill or agent
+shows the user. No exceptions. The skill carries `/unslop`'s rules, so it works without
+`/unslop` installed.
+
+End every commit message with exactly this line, then the `Signed-off-by` line that `-s`
+adds:
+
+```
+Co-Authored-By: Claude
+```
+
+No model name and no email address. This holds for every commit, including the fixes an
 agent makes after a `/deep-review` pass.
 
