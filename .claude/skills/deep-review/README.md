@@ -186,7 +186,7 @@ this table is only an index. They are restated at the top of the generated
 | **O10** | `$REVIEW_FINDING_SEVERITY_THRESHOLD` = `info` — suppress nothing | Upstream requires it; no harness to supply it |
 | **O11** | Run the review body through `unslop` before showing or posting it | It is prose a person reads |
 | **O12** | `Co-authored-by: Claude` trailer on every review | Attribution |
-| **O13** | Prompts are written to `$RUN_DIR` and dispatched by path; raw replies kept there too | 300 KB packages; and O9's tuning signal is only checkable if the replies survive |
+| **O13** | Prompts are written to `$RUN_DIR` and dispatched by path; raw replies kept there too, and the adjudicated verdict as `verdict.json` and `verdict.md` | 300 KB packages; O9's tuning signal is only checkable if the replies survive; and `/address-review --from` reads the verdict from disk instead of from a review posted on the PR |
 | **O14** | Check each composed prompt before dispatch; normalise sub-agent replies | A `sed` range once dropped the whole diff from the challenger prompt, silently |
 | **O15** | The challenger downgrades on evidence — never to keep the set small, never on impact it already conceded, never because a file was not supplied | It once demoted the highest-impact finding on set-size grounds, and later demoted a true one for being unverifiable |
 | **O16** | After the challenger, cross-check against reviews already on the PR; a point on the same line is not covered unless it is the same failure | Catches what all five dimensions missed, without anchoring their severities |
@@ -235,10 +235,16 @@ in `src/header.md` as a new override instead.
   holds base-branch code. Do not "correct" a finding by checking your checkout.
 - **This reviews PRs, not branches.** There is no local-diff mode; open the PR
   first, then review it.
-- **The run leaves a directory behind.** Prompts, raw sub-agent replies and the
-  pre-challenger findings go to `${TMPDIR:-/tmp}/deep-review-<pr>` (override
-  **O13**), and the run prints the path. Read it when a finding looks wrong, and
-  delete it when you are done — nothing cleans it up.
+- **The run leaves a directory behind.** Prompts, raw sub-agent replies, the
+  pre-challenger findings and the adjudicated `verdict.json` / `verdict.md` go to
+  `${TMPDIR:-/tmp}/deep-review-<pr>` (override **O13**), and the run prints the
+  paths. Read it when a finding looks wrong, and delete it when you are done —
+  nothing cleans it up.
+- **Fixing your own PR does not need the review posted.** Hand the verdict file to
+  the next skill: `/address-review <pr> --from ${TMPDIR:-/tmp}/deep-review-<pr>/verdict.json`.
+  It takes each finding as an item already adjudicated by the challenger, so it does
+  not triage them again, and it picks up the human and bot comments on the PR in the
+  same run. Delete the run directory and the hand-off is gone with it.
 - **A `safeguards flagged this message` error at skill load is not a bug here.**
   It comes and goes on the same model: retry once, and re-run the orchestrator on
   a different model only if the retry dies the same way; see override **O17**.

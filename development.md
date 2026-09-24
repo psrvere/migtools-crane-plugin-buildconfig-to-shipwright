@@ -92,10 +92,11 @@ want.
            │  beats, then a challenger that can only    │      Silence counts as a finding
            │  delete findings, never add them           │
            └─────────────────────┬──────────────────────┘
-                                 │
+                                 │  the run writes verdict.json and prints its path;
+                                 │  hand that path to the next phase as --from
                                  ▼
   Phase 9  ┌────────────────────────────────────────────┐
-           │  /address-review <PR#>                     │  ◄── triages every thread
+           │  /address-review <PR#> [--from <path>]     │  ◄── triages every thread
            │  reads every thread, fixes what is valid,  │      into fix, answer or
            │  replies, resolves, and re-checks          │      push back
            └────────────────────────────────────────────┘
@@ -106,6 +107,13 @@ want.
     /setup-repos update   — re-scan after cloning a new repo
     /deep-review <PR#>    — review any open PR, no local branch needed
 ```
+
+Phases 8 and 9 hand over on disk, not through GitHub. `/deep-review` writes its
+adjudicated findings to `verdict.json` in its run directory and prints the path;
+`/address-review --from <that path>` reads them as items already settled and does not
+triage them a second time. So reviewing your own PR never means posting a review to
+yourself: the findings go straight into the fix round, and the human and bot comments
+already on the PR are picked up in the same run.
 
 Each phase is its own command. Review sits between the two test stages on purpose: the
 unit stage is cheap and catches what review should not waste time on, while the cluster
@@ -124,8 +132,8 @@ avoidable cost in the loop.
 | `/tech-test <ISSUE-KEY or branch> cluster` | Runs the original BuildConfig on a real cluster first, then the converted Build, and compares the two output images by digest and labels. A converted Build that merely succeeds proves nothing. The question is whether it did the same job as the one it replaced. That comparison is what makes it a test rather than a smoke check | A reviewed branch, `oc`, and a cluster | A run report; fixtures archived, then only what it created is deleted |
 | `/tech-document [<ISSUE-KEY>]` | Brings the docs in step with a code change before the branch becomes a PR: the support-matrix row when a warning moved, the architecture page when the pipeline order changed, an ADR when a new rule was decided. Can also audit the whole doc map against the code | A branch whose code changed | Doc edits on the branch |
 | `/create-pr [<ISSUE-KEY>]` | Commits signed-off, pushes to your fork, and opens (or amends) the PR against upstream with this repo's conventions enforced, updating the Jira story when asked. Never pushes to `origin` | A branch ready to publish | A commit, a fork push, and an open PR |
-| `/deep-review <pr-number\|url>` | Up to six reviewers read an open PR in parallel, each with an explicit list of what it does and does not own, so they do not all report the same naming nit. A challenger then runs as its own stage: it reads the findings and the diff, but never the orchestrator's reasoning, and can only delete findings, never add them. If a top-tier reviewer returns nothing, that silence is recorded as a finding rather than passing as a clean bill of health | An open PR | Findings in the terminal. Posts nothing unless asked |
-| `/address-review [<pr-number\|url>]` | Reads every inline thread, review write-up and PR comment, the bots and your own `/deep-review` verdict included, and triages each into fix, answer or push back. After you approve the table it fixes the code, tests with `GOWORK=off`, commits signed, pushes to the fork, replies where each comment was left, and resolves the threads | An open PR with feedback | Fixes on the branch; replies and resolved threads on the PR |
+| `/deep-review <pr-number\|url>` | Up to six reviewers read an open PR in parallel, each with an explicit list of what it does and does not own, so they do not all report the same naming nit. A challenger then runs as its own stage: it reads the findings and the diff, but never the orchestrator's reasoning, and can only delete findings, never add them. If a top-tier reviewer returns nothing, that silence is recorded as a finding rather than passing as a clean bill of health | An open PR | Findings in the terminal, and `verdict.json` plus `verdict.md` in the run directory, which is what `/address-review --from` reads. Posts nothing unless asked |
+| `/address-review [<pr-number\|url>] [--from <verdict.json>]` | Reads every inline thread, review write-up and PR comment, the bots and your own `/deep-review` verdict included, and triages each into fix, answer or push back. `--from` takes that verdict from `/deep-review`'s run directory instead of from a review posted on the PR, and those findings skip triage because deep-review's challenger already adjudicated them. After you approve the table it fixes the code, tests with `GOWORK=off`, commits signed, pushes to the fork, rewrites the parts of the PR body the fixes made wrong, replies where each comment was left, and resolves the threads | An open PR with feedback, a `/deep-review` verdict file, or both | Fixes on the branch; a refreshed PR body; replies and resolved threads on the PR |
 
 ## Getting started
 
@@ -196,7 +204,11 @@ Then publish and review the PR, and address what comes back:
 ```
 /create-pr BUILD-2269            # commit, push to your fork, open the PR
 /deep-review 32                  # multi-agent review of the published PR
-/address-review 32               # triage the threads, fix, reply, resolve
+                                 # prints the verdict.json path at the end
+
+/address-review 32 --from /tmp/deep-review-32/verdict.json
+                                 # those findings plus every thread on the PR:
+                                 # fix, commit, refresh the PR body, reply, resolve
 ```
 
 Push branches to your fork, never to `origin`. Upstream changes land through pull

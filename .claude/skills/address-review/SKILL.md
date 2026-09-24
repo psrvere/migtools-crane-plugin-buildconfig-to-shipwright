@@ -1,7 +1,7 @@
 ---
 name: address-review
-description: Address the review feedback on an open PR. Reads every inline thread, review write-up and PR comment (bots and the author's own deep-review verdict included), triages each into fix, answer or push back, shows a table, and after the user's go fixes the code, tests with GOWORK=off, commits signed, pushes to the fork, replies where each comment was left, resolves the threads and re-checks. Trigger on "address-review", "address the review on PR N", "reply to the reviewers", "resolve the review threads".
-argument-hint: [PR number | PR URL | blank] [--dry-run] [--only=threads,reviews,comments]
+description: Address the review feedback on an open PR. Reads every inline thread, review write-up and PR comment (bots and the author's own deep-review verdict included, posted on the PR or handed over as a verdict file with --from), triages each into fix, answer or push back, shows a table, and after the user's go fixes the code, tests with GOWORK=off, commits signed, pushes to the fork, refreshes the PR body, replies where each comment was left, resolves the threads and re-checks. Trigger on "address-review", "address the review on PR N", "reply to the reviewers", "resolve the review threads".
+argument-hint: [PR number | PR URL | blank] [--from <verdict.json>] [--dry-run] [--only=threads,reviews,comments]
 allowed-tools: [Bash, Read, Grep, Glob, Edit, Write, Agent, Skill]
 user_invocable: true
 ---
@@ -9,8 +9,10 @@ user_invocable: true
 # /address-review — close the loop on a PR's review
 
 Reviewers have spoken on an open PR. This skill works out what to do about each thing they
-said, shows you a table, and after your go does the fixing, committing, pushing, replying
-and resolving in one pass.
+said, shows you a table, and after your go does the fixing, committing, pushing, refreshing
+the PR body, replying and resolving in one pass. Your own `/deep-review` findings can join
+that list straight from its run directory (`--from`), so reviewing your own PR does not
+mean posting a review to yourself first.
 
 `$SKILL` below is the directory holding this file: the harness prints it as the skill's
 base directory when the skill loads. Type that path literally into Stage 0; never leave
@@ -27,8 +29,15 @@ The user invoked this with: $ARGUMENTS
 | blank | the open PR whose head is the current branch in the user's fork |
 | `66` | PR number |
 | `https://github.com/OWNER/REPO/pull/66…` | URL; the number is the one after `/pull/` |
+| `--from <path>` | a `/deep-review` verdict file (`verdict.json` in that run's directory). Its findings join the feedback as items of kind `deep-review`, alongside whatever is on the PR |
 | `--dry-run` | stop after the table; print every reply draft; write and post nothing |
 | `--only=threads,reviews,comments` | restrict to those kinds (any subset) |
+
+`--from` is how a review of your own PR reaches this skill without being posted to
+GitHub first. `/deep-review` writes the adjudicated findings to
+`${TMPDIR:-/tmp}/deep-review-<PR>/verdict.json` and prints the path (its override O13);
+pass that path here. Nothing about a deep-review verdict that *was* posted to the PR
+changes: it still arrives as a review item and is handled the same way.
 
 ## Iron rules
 
@@ -150,6 +159,44 @@ gh pr list --repo "$UPSTREAM" --author "$ME" --state open --json number,title,fi
 jq '.items | length' "$SCRATCH/feedback.json"
 ```
 
+### With `--from`, merge the verdict file in
+
+Only when `--from` was given. Stop with a plain sentence if the path does not exist or
+`jq -e . <path>` fails; a missing verdict file is a typo, not something to work around.
+The file is an array of finding objects (`severity`, `category`, `file`, `line`,
+`description`, `remediation`), the shape `/deep-review` writes.
+
+```bash
+. "${TMPDIR:-/tmp}/address-review-<PR>/env"; : "${WT:?}" "${SCRATCH:?}" "${BRANCH:?}"
+ME=$(gh api user --jq .login)
+cp "$SCRATCH/feedback.json" "$SCRATCH/feedback-github.json"
+jq -n --slurpfile fb "$SCRATCH/feedback-github.json" \
+      --slurpfile vd '<the --from path, typed literally>' --arg me "$ME" '
+  ($fb[0]) as $gh
+  | (($vd[0] | if type == "array" then . else (.findings // []) end)) as $found
+  | ($gh.items | length) as $base
+  | $gh + {items: ($gh.items + ($found | to_entries | map({
+      n: (.key + $base + 1),
+      kind: "deep-review",
+      id: ("deep-review:" + (.value.file // "") + ":" + ((.value.line // 0) | tostring)
+           + ":" + (.value.category // "")),
+      author: $me, is_bot: false, is_deep_review: true, from_file: true,
+      severity: .value.severity, category: .value.category,
+      path: .value.file, line: .value.line,
+      body: ((.value.description // "")
+             + (if (.value.remediation // "") == "" then "" else "\n\n" + .value.remediation end))
+    })))}' > "$SCRATCH/feedback.json"
+jq '[.items[] | select(.kind == "deep-review")] | length' "$SCRATCH/feedback.json"
+```
+
+The `id` is built from the file, line and category rather than taken from GitHub,
+because these items have no GitHub id and the run needs a stable one for the table, the
+triage files and the summary. Two findings on the same line in the same category are one
+item; that is the intended collapse.
+
+`--only` filters on `kind`, so `--only=threads` drops these too. Say so in the summary
+if it happens.
+
 Build the `Existing threads:` list now with the query in Stage 2 step 5 (it covers
 resolved threads too, which `feedback.json` does not), saving it to `$SCRATCH/threads.txt`.
 Only then apply `--only` by filtering `.items` on `kind`. If the item count is zero, skip
@@ -159,11 +206,36 @@ without verdicts and ask whether to run in two rounds.
 `feedback.json` fields you will use: `pr.head_sha`, `items[].n`, `.kind`, `.id`,
 `.author`, `.is_bot`, `.path`, `.line`, `.original_line`, `.start_line`,
 `.original_start_line`, `.is_outdated`, `.reopened`, `.comments[]`, `.state`, `.body`,
-`.is_deep_review`, and `skipped[]`.
+`.is_deep_review`, `.from_file`, and `skipped[]`. `.is_deep_review` is set two ways: by
+`scripts/get-pr-feedback` on a review whose body carries the head-SHA marker this skill's
+`/deep-review` writes, and by the `--from` merge above. `.from_file` is set only by the
+merge, and it means the item has nothing behind it on GitHub.
 
 ## Stage 2: Triage, one Sonnet agent per item
 
-Read `$SKILL/agents/triage.md` once. For each item, dispatch an Agent call with
+**Items with `is_deep_review: true` are not triaged.** That is every `--from` item and
+every posted `/deep-review` verdict. Those findings already went through an adversarial
+challenger whose whole job was to delete the wrong ones, on the same code, with more
+context than a triage agent gets. Re-triaging them spends a Sonnet agent and then an Opus
+challenger per item to arrive back where the verdict already stood, and the second pass is
+the weaker of the two. Everything else is triaged as before: a bot's comment, a human
+reviewer's thread, a review write-up.
+
+Build their points yourself, no agent:
+
+- One point per finding. A `--from` item holds exactly one, so its `p` is the item number
+  as a string. A posted verdict is one item holding several findings, so split the review
+  body by finding and number them `<n>a`, `<n>b`, …
+- `verdict` is `fix`. `plan` is the finding's remediation, or its description when it
+  carries no remediation. `files` is the file it names. `quote` is the finding's first
+  line.
+- `reply` is the fix shape from `agents/triage.md`: the quote, a blank line, then
+  ``Fixed in `<sha>`: `` and what changed. Stage 4's `reply_notes` correct it the same way
+  they correct a triaged point's.
+- The Stage 3 row carries the note `adjudicated by deep-review's challenger`, so the user
+  can see which rows had no second opinion and can still overrule any of them in the gate.
+
+Read `$SKILL/agents/triage.md` once. For each remaining item, dispatch an Agent call with
 `subagent_type: general-purpose`, `model: "sonnet"`, and a prompt made of:
 
 1. The body of `agents/triage.md` (everything after the frontmatter).
@@ -193,14 +265,17 @@ point's verdict; the multi-point rule is in `agents/triage.md`.
 Each of those parts may be pasted or handed over as a file path the agent reads (`agents/triage.md`, `$WT/AGENTS.md`, `$SCRATCH/siblings.json`, `$SCRATCH/pr.diff` are all files); pointing keeps the orchestrator's context small. Send up to 4 Agent calls in one message; wait; send the next 4. Do not edit anything
 yourself while agents run.
 
-When all return, load every `$SCRATCH/triage/<n>.json`. A missing or unparsable file
-becomes verdict `ask` with `ask.question: "triage failed for item <n>"`. Never invent a
-verdict.
+When all return, load `$SCRATCH/triage/<n>.json` for every item you dispatched. A missing
+or unparsable file becomes verdict `ask` with `ask.question: "triage failed for item <n>"`.
+Never invent a verdict. An item you did not dispatch has no file and is not missing.
 
 ## Stage 2b: Challenge the pushbacks, one Opus agent
 
-Collect every point whose verdict is `not-valid`, `declined` or `ask`. If there are none,
-skip this stage and say so in the summary. Otherwise dispatch ONE Agent call,
+Collect every point whose verdict is `not-valid`, `declined` or `ask`. A point from an
+`is_deep_review` item is never among them: Stage 2 set it to `fix` on the strength of
+deep-review's own challenger, and this stage exists to second-guess a pushback, not to
+re-run someone else's adversarial pass. If there are none, skip this stage and say so in
+the summary. Otherwise dispatch ONE Agent call,
 `subagent_type: general-purpose`, `model: "opus"`, prompt = body of
 `$SKILL/agents/challenger.md` + the collected points (with their item JSON and triage
 JSON) + the same PR, sibling, existing-threads and rules context as Stage 2 + `Base ref:
@@ -227,14 +302,18 @@ PR #66  <title>   head <short sha>
      2b  "<quote>"                               answer    <the answer in one line>
  3   psrvere      review, deep-review verdict  fix         (2 points) …
  4   aufi         comment                      skip        status update, nothing to do
+ 5   deep-review  buildconfig/chain.go line 88 fix         <plan> (adjudicated by deep-review's challenger)
 
- N boilerplate items skipped.  Threads with a pushback to a human reviewer stay open after the reply.
+ N boilerplate items skipped.  M points came from the verdict file and were not re-triaged.
+ Threads with a pushback to a human reviewer stay open after the reply.
 ```
 
 `where` is `path line N` for threads, where N is the first non-null of `line`,
 `start_line`, `original_line`, `original_start_line` (`outdated` appended when
 `is_outdated`); `review, <state in words>` or `review, deep-review verdict` for reviews;
-`comment` for comments. `what happens` is plain English, no file paths beyond the
+`comment` for comments; `path line N` again for a `deep-review` item, whose `from` column
+reads `deep-review` rather than a login, because the finding came from a file and not from
+anyone's comment on the PR. `what happens` is plain English, no file paths beyond the
 `where` column. The footer counts `skipped[]` as "N items skipped (resolved, already
 answered, bots, boilerplate)".
 
@@ -320,6 +399,64 @@ commit them. If this machine has no signing key (`git config user.signingkey` em
 drop `-S` and keep `-s`. If the push is rejected, stop: print the error, tell the user
 the fork tip moved, and post nothing.
 
+## Stage 6b: Refresh the PR body
+
+The commit just pushed can have made the PR body wrong: a Summary sentence describing
+behaviour the fix changed, a Testing line naming a run that no longer matches, a Docs line
+that misses a page the fix touched. Nothing else in this skill updates the body, so it
+goes stale quietly and stays that way until a reviewer trips over it. Three PR bodies were
+stale this way on 2026-09-22.
+
+Skip the stage when Stage 6 did not run, and say so in the summary.
+
+```bash
+. "${TMPDIR:-/tmp}/address-review-<PR>/env"; : "${WT:?}" "${SCRATCH:?}" "${BRANCH:?}" "${PR:?}"
+gh pr view "$PR" --repo "$UPSTREAM" --json body --jq .body > "$SCRATCH/pr-body-old.md"
+git -C "$WT" log --format='%h %s%n%b%n---' "$HEAD_SHA..HEAD" > "$SCRATCH/round-commits.txt"
+```
+
+`HEAD_SHA` is the PR head Stage 0 recorded, so that range is exactly what this round
+pushed, whether it was one commit or several. Read both files in full, then write the new
+body:
+
+1. **Rewrite, do not append.** Every sentence under `## Summary`, `## Testing`, `## Docs`
+   or `## Key design decisions` that a commit in this round made false is rewritten where
+   it stands. A correction added lower down does not help a reader who believed the first
+   paragraph and stopped there. Leave a sentence the round did not touch exactly as it is;
+   this stage is not a rewrite of the author's PR body.
+2. **Keep the sections create-pr defines.** `.claude/skills/create-pr/SKILL.md` Step 8
+   holds the body structure and is the only place it is written down. Use the section
+   names from there; do not invent new ones and do not reorder what is there.
+3. **Add or extend `## Review fixes`**, after `## Key design decisions`. One bullet per
+   point fixed this round: the short commit SHA, what was wrong, and what the code or the
+   doc does now. Then name every point left open — an `ask` the user parked, an
+   `unapplied` one, a pushback to a human reviewer — so the section is the whole round and
+   not only its wins. A later round extends this section rather than starting a second
+   one.
+4. **Copy the tail verbatim and keep it last:** the `### Jira Issues` section, the
+   `Co-Authored-By: Claude` line, and any `<!-- ... -->` block, in that order. A bot's
+   summary block belongs to the bot; editing a word of it misattributes the text, and the
+   bot rewrites its own block on its next run anyway.
+5. Run the new text through the `unslop` skill. What rule 4 copies verbatim is excluded,
+   the way Stage 7 excludes the blockquotes and the footer.
+
+Write the result to `$SCRATCH/pr-body.md` with the Write tool. Never a heredoc and never
+`--body` with an inline string: the body carries reviewer wording and commit subjects.
+Then post it and read it back:
+
+```bash
+. "${TMPDIR:-/tmp}/address-review-<PR>/env"; : "${SCRATCH:?}" "${BRANCH:?}" "${PR:?}"
+gh pr edit "$PR" --repo "$UPSTREAM" --body-file "$SCRATCH/pr-body.md"
+gh pr view "$PR" --repo "$UPSTREAM" --json body --jq .body | grep -c '^## Review fixes'
+```
+
+A count of 1 is the confirmation. A count of 0, or a failing `gh pr edit`, is recorded as
+"PR body not refreshed: <error>" in the Stage 8 summary; do not retry the post in a loop
+and do not carry on as if it had landed.
+
+With `--dry-run`, print the rewritten body and post nothing. (`--dry-run` stops the run at
+Stage 3 today, so this is the rule for the day that changes.)
+
 ## Stage 7: Reply where they wrote, then resolve
 
 Order: push first (done), then replies, so every "Fixed in" names a real commit.
@@ -329,6 +466,13 @@ Start with `. "${TMPDIR:-/tmp}/address-review-<PR>/env"; : "${WT:?}" "${SCRATCH:
 other than `skip`, and never for a point whose verdict is `ask` or `unapplied` (a thread
 in that state gets no reply and stays open): An item with verdict `skip` gets no reply
 and no resolve, bot or human.
+
+**An item with `from_file: true` is skipped here entirely.** It came from a verdict file,
+so there is no thread to reply in, no review to answer and nothing to resolve; posting a
+comment about it would tell a reviewer something no reviewer asked. Count these items in
+Stage 8 and leave the PR alone. Stage 6b is where this round's work becomes visible on the
+PR. A deep-review verdict that *was* posted is an ordinary review item and is answered
+like any other.
 
 1. Rebuild the reply from the points as they stand now, after the challenger, the gate
    edits and `reply_notes`. Thread: the single point's `reply`. Review or comment:
@@ -392,10 +536,16 @@ Print the summary, through `unslop`:
 ```
 Addressed 6 of 6 items on PR #66.
 Fixed 4, answered 2, pushed back 1, left open 1 (thread 2, aufi), skipped 1 boilerplate.
+3 of those came from the deep-review verdict file and were not re-triaged.
 Commit 5942f41 pushed to fork. Tests: GOWORK=off go test passed.
+PR body refreshed: 2 sentences rewritten, Review fixes section has 4 bullets.
 Challenger: 1 confirmed, 0 flipped.
 https://github.com/migtools/crane-plugin-buildconfig-to-builds/pull/66
 ```
+
+The verdict-file line is printed only when `--from` was given, and names the path. The PR
+body line is printed on every run that reached Stage 6b: "PR body refreshed: …", or "PR
+body not refreshed: <error>", or "Stage 6b skipped, nothing was committed".
 
 Add a line for anything skipped or failed: "Stage 5 skipped, prose-only changes",
 "reply to thread 3 failed: <error>", "pre-existing failure in TestX not touched here",
