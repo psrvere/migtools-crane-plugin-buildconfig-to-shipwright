@@ -4,7 +4,6 @@ metadata:
   annotations:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     crane.konveyor.io/conversion-warnings: |-
-      [sample-project/nodejs-forbidden-env] BuildConfig sample-project/nodejs-forbidden-env sets sourceStrategy.env NODE_OPTIONS, LD_LIBRARY_PATH, APP_MODE. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [sample-project/nodejs-forbidden-env] BuildConfig sample-project/nodejs-forbidden-env sets sourceStrategy.env NODE_OPTIONS, a name Shipwright forbids for security reasons. From Shipwright v0.21.0 a Build carrying it stays unregistered with the reason SpecEnvNameForbidden, so no BuildRun of it ever starts. The entry is kept in spec.env so you can see what to act on: take it off the Build and get the value in another way, or have a cluster administrator allow the name through the build controller's FORBIDDEN_ENV_VAR_NAMES setting.
       [sample-project/nodejs-forbidden-env] BuildConfig sample-project/nodejs-forbidden-env sets sourceStrategy.env LD_LIBRARY_PATH, a name Shipwright forbids for security reasons. From Shipwright v0.21.0 a Build carrying it stays unregistered with the reason SpecEnvNameForbidden, so no BuildRun of it ever starts. The entry is kept in spec.env so you can see what to act on: take it off the Build and get the value in another way, or have a cluster administrator allow the name through the build controller's FORBIDDEN_ENV_VAR_NAMES setting.
     crane.konveyor.io/converted-from: build.openshift.io/v1/BuildConfig/nodejs-forbidden-env
@@ -24,6 +23,11 @@ spec:
   paramValues:
   - name: builder-image
     value: registry.example.com/builder/nodejs:20
+  - name: build-env
+    values:
+    - value: NODE_OPTIONS=$(NODE_OPTIONS)
+    - value: LD_LIBRARY_PATH=$(LD_LIBRARY_PATH)
+    - value: APP_MODE=$(APP_MODE)
   source:
     git:
       url: https://example.com/git/nodejs-app

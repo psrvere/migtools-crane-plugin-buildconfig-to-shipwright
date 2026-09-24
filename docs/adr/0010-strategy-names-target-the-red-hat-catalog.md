@@ -28,7 +28,7 @@ writes are one unit (ADR-0004), and the two catalogs do not declare the same par
 | Parameter the converter can write | catalog `source-to-image` | upstream `source-to-image` |
 |---|---|---|
 | `builder-image` | yes | yes |
-| `scripts-url`, `incremental`, `pull-policy`, the three `registries-*` | yes | no |
+| `build-env`, `scripts-url`, `incremental`, `pull-policy`, the three `registries-*` | yes | no |
 
 Upstream's `source-to-image` declares one parameter. Renaming the strategy on an upstream
 cluster trades a registration failure on the name for one on the parameters, and only for a

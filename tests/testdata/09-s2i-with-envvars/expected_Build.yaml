@@ -4,7 +4,7 @@ metadata:
   annotations:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     crane.konveyor.io/conversion-warnings: |-
-      [/mys2itest] BuildConfig /mys2itest sets sourceStrategy.env BUILD_LOGLEVEL, FIELDREF_ENV, CONFIGMAPKEYREF_ENV, SECRETKEYREF_ENV, FIELDREF_CLONE_ENV, FIELDREF_CLONE_CLONE_ENV, UNAVAILABLE_ENV, ESCAPED_ENV. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
+      [/mys2itest] BuildConfig /mys2itest sets sourceStrategy.env FIELDREF_ENV from a fieldRef or resourceFieldRef. OpenShift read these from the Build object. Shipwright reads them from the BuildRun pod, so metadata.name and labels give the pod's values. Check that the build still gets the value it expects
       [/mys2itest] Output ImageStreamTag "test:latest" resolved to fallback URL: image-registry.openshift-image-registry.svc:5000//test:latest
       [/mys2itest] No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.
       [/mys2itest] BuildConfig mys2itest uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
@@ -45,6 +45,16 @@ spec:
   paramValues:
   - name: builder-image
     value: quay.io/redhat-developer/test-build-simples2i:1.2
+  - name: build-env
+    values:
+    - value: BUILD_LOGLEVEL=$(BUILD_LOGLEVEL)
+    - value: FIELDREF_ENV=$(FIELDREF_ENV)
+    - value: CONFIGMAPKEYREF_ENV=$(CONFIGMAPKEYREF_ENV)
+    - value: SECRETKEYREF_ENV=$(SECRETKEYREF_ENV)
+    - value: FIELDREF_CLONE_ENV=$(FIELDREF_CLONE_ENV)
+    - value: FIELDREF_CLONE_CLONE_ENV=$(FIELDREF_CLONE_CLONE_ENV)
+    - value: UNAVAILABLE_ENV=$(UNAVAILABLE_ENV)
+    - value: ESCAPED_ENV=$(ESCAPED_ENV)
   source:
     git:
       url: https://github.com/sclorg/nodejs-ex

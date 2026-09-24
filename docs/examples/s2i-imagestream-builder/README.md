@@ -40,7 +40,7 @@ crane apply
 |---|---|
 | `spec.strategy.name: source-to-image` | the Source strategy type |
 | `spec.paramValues[builder-image]: registry.access.redhat.com/ubi9/nodejs-18:latest` | `sourceStrategy.from`, resolved through the ImageStream mapping. Without the flag it would be `image-registry.openshift-image-registry.svc:5000/openshift/nodejs:18-ubi8`, which exists on no target cluster |
-| `spec.env` | `sourceStrategy.env`. Copied, but s2i does not see it. See the first warning |
+| `spec.env` and `spec.paramValues[build-env]` | `sourceStrategy.env`. `build-env` names `NPM_MIRROR`, so `npm install` in the assemble step sees it |
 | `spec.source.contextDir: source-build` | `source.contextDir` |
 | `spec.output.image: image-registry.openshift-image-registry.svc:5000/my-app/sample-nodejs:latest` | the ImageStreamTag output in its internal-registry form. No mapping touched it |
 | annotation `original-triggers` | all three triggers. The webhook keeps only the secret's name; an inline secret value would have been left out |
@@ -49,7 +49,6 @@ crane apply
 
 | Warning | Meaning |
 |---|---|
-| `sets sourceStrategy.env NPM_MIRROR …` | the source-to-image strategy passes its `build-env` parameter to s2i, not `spec.env`, so `npm install` in the assemble step does not see `NPM_MIRROR`. Add `{name: build-env, values: [{value: NPM_MIRROR=<value>}]}` to `spec.paramValues` before the first build |
 | `Output ImageStreamTag "sample-nodejs:latest" resolved to fallback URL: …` | no mapping matched the output, so the plugin used the internal-registry form. Right for an OpenShift target |
 | `No explicit pushSecret found for ImageStreamTag output …` | the push to the internal registry works only if the BuildRun runs as a ServiceAccount with push rights. On OpenShift with the Builds operator that is the default `pipeline` account. See step 1 below |
 | `uses runPolicy "Serial", which is dropped` | BuildRuns run concurrently |

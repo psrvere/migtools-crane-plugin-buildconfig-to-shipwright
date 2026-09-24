@@ -23,7 +23,7 @@ second, because the operator does not accept hand-edited strategies.
 
 Verified 2026-09-03: every parameter the plugin emits is declared by the shipped strategy it
 targets. buildah: build-args, dockerfile, no-cache, pull, runtime-stage-from, squash, and the
-three registries lists. source-to-image: builder-image, scripts-url, incremental, pull-policy
+three registries lists. source-to-image: builder-image, build-env, scripts-url, incremental, pull-policy
 and the registries lists. The step
 names in the BuildRun template, build-and-push for buildah and s2i-generate plus buildah for
 source-to-image, match too.

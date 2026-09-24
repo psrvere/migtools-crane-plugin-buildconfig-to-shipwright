@@ -56,8 +56,9 @@ what to do about it. Nothing is dropped silently and nothing is carried silently
 
 ## Consequences
 
-- One env list can draw two warnings: the existing one about where `spec.env` lands for that
-  strategy, and one per entry the blocklist covers.
+- One env list can draw more than one warning: one per entry the blocklist covers, next to
+  whatever that strategy already warns about its env (W69 for `dockerStrategy.env`; W81 and
+  W82 for `sourceStrategy.env`, ADR-0017).
 - A Build the plugin knowingly leaves unregisterable is a new shape for this repository. It
   is the same trade as ADR-0007: fail on the cluster, legibly, rather than quietly convert
   into something different from what the BuildConfig said.

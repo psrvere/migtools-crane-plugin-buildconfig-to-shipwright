@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -36,6 +37,7 @@ const (
 	S2IScriptsURLParamName    = "scripts-url"
 	S2IIncrementalParamName   = "incremental"
 	S2IPullPolicyParamName    = "pull-policy"
+	S2IBuildEnvParamName      = "build-env"
 	RuntimeStageFromParamName = "runtime-stage-from"
 	BuildArgsParamName        = "build-args"
 
@@ -66,10 +68,9 @@ const (
 
 	ConfigMapsRFE = "https://issues.redhat.com/browse/BUILD-1745"
 	SecretsRFE    = "https://issues.redhat.com/browse/BUILD-1744"
-	// DockerEnvRFE and SourceEnvRFE track passing strategy env to the build
-	// itself; until they land, the env only reaches the step containers.
+	// DockerEnvRFE tracks passing dockerStrategy.env to the build itself; until
+	// it lands, the env only reaches the build container.
 	DockerEnvRFE = "https://redhat.atlassian.net/browse/BUILD-2499"
-	SourceEnvRFE = "https://redhat.atlassian.net/browse/BUILD-2500"
 	// VolumeMigrationDoc is the runbook for making converted Build volumes
 	// pass Shipwright validation (repo-relative; upstream URL not assumed).
 	VolumeMigrationDoc = "docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository"
@@ -385,13 +386,6 @@ func metadataKeyMatches(key string, prefixes, keys []string) bool {
 	return false
 }
 
-// validBuildArgName reports whether a build arg name is safe to embed in a
-// docker --build-arg NAME=VALUE pair or a Shipwright ObjectKeyRef Format
-// template. Names containing '=', '$', '{', '}', whitespace, or control
-// characters would corrupt the emitted format — e.g. a name containing
-// ${SECRET_VALUE} would be substituted a second time at BuildRun resolution,
-// relocating secret material into the arg-name position — and can never match
-// a Dockerfile ARG, so such args are skipped with a warning.
 // envNames lists the variable names for a warning, never the values, which
 // can be Secret material.
 func envNames(env []corev1.EnvVar) string {
@@ -466,6 +460,51 @@ func (c *Converter) warnForbiddenEnv(bc *buildv1.BuildConfig, field string, env 
 	}
 }
 
+// addS2IBuildEnv names every sourceStrategy.env entry in the source-to-image
+// strategy's build-env parameter as NAME=$(NAME). The entries themselves stay
+// in spec.env, which Shipwright merges into every step; the kubelet expands
+// $(NAME) in the step's arguments from that environment, so s2i gets the
+// resolved value, valueFrom entries included. A name the kubelet cannot read
+// back out of $(...) is left out with a warning, and a fieldRef or
+// resourceFieldRef entry is kept with one, because on OpenShift it read the
+// Build object and here it reads the BuildRun pod.
+func (c *Converter) addS2IBuildEnv(bc *buildv1.BuildConfig, env []corev1.EnvVar, b *shipwrightv1beta1.Build) {
+	var values []shipwrightv1beta1.SingleValue
+	var unsafe, podFields []string
+	for _, e := range env {
+		if !validBuildArgName(e.Name) || strings.ContainsAny(e.Name, "()") {
+			unsafe = append(unsafe, strconv.Quote(e.Name))
+			continue
+		}
+		if e.ValueFrom != nil && (e.ValueFrom.FieldRef != nil || e.ValueFrom.ResourceFieldRef != nil) {
+			podFields = append(podFields, e.Name)
+		}
+		item := e.Name + "=$(" + e.Name + ")"
+		values = append(values, shipwrightv1beta1.SingleValue{Value: &item})
+	}
+	if len(values) > 0 {
+		b.Spec.ParamValues = append(b.Spec.ParamValues, shipwrightv1beta1.ParamValue{
+			Name:   S2IBuildEnvParamName,
+			Values: values,
+		})
+	}
+	if len(unsafe) > 0 {
+		c.warnf("BuildConfig %s/%s sets sourceStrategy.env %s, and a name like that cannot be passed to s2i as NAME=$(NAME). The entries stay in spec.env, which s2i does not see. Rename them, or add each one to the Build's build-env parameter as NAME=VALUE. For an entry read from a Secret that puts the value on the Build in plain text, so rename it instead",
+			bc.Namespace, bc.Name, strings.Join(unsafe, ", "))
+	}
+	if len(podFields) > 0 {
+		c.warnf("BuildConfig %s/%s sets sourceStrategy.env %s from a fieldRef or resourceFieldRef. OpenShift read these from the Build object. Shipwright reads them from the BuildRun pod, so metadata.name and labels give the pod's values. Check that the build still gets the value it expects",
+			bc.Namespace, bc.Name, strings.Join(podFields, ", "))
+	}
+}
+
+// validBuildArgName reports whether a build arg name is safe to embed in a
+// docker --build-arg NAME=VALUE pair or a Shipwright ObjectKeyRef Format
+// template. Names containing '=', '$', '{', '}', whitespace, or control
+// characters would corrupt the emitted format — e.g. a name containing
+// ${SECRET_VALUE} would be substituted a second time at BuildRun resolution,
+// relocating secret material into the arg-name position — and can never match
+// a Dockerfile ARG, so such args are skipped with a warning.
 func validBuildArgName(name string) bool {
 	if name == "" {
 		return false
@@ -733,13 +772,14 @@ func (c *Converter) processSourceStrategy(bc *buildv1.BuildConfig, b *shipwright
 	}
 
 	// Env. The source-to-image strategy passes its build-env parameter to s2i,
-	// not spec.env (BUILD-1181).
+	// not spec.env (BUILD-1181). spec.env keeps every entry, and build-env
+	// names each one as NAME=$(NAME): the kubelet expands that reference from
+	// the step's environment, which Shipwright fills from spec.env, so
+	// valueFrom entries and $(OTHER) references resolve as they did on
+	// OpenShift (ADR-0017).
 	if ss.Env != nil {
 		b.Spec.Env = append(b.Spec.Env, ss.Env...)
-	}
-	if len(ss.Env) > 0 {
-		c.warnf("BuildConfig %s/%s sets sourceStrategy.env %s. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see %s",
-			bc.Namespace, bc.Name, envNames(ss.Env), SourceEnvRFE)
+		c.addS2IBuildEnv(bc, ss.Env, b)
 		c.warnForbiddenEnv(bc, "sourceStrategy.env", ss.Env)
 	}
 

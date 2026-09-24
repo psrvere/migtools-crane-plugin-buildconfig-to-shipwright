@@ -5,7 +5,6 @@ metadata:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     buildconfig-to-shipwright/original-triggers: '[{"type":"ImageChange","imageChange":{}},{"type":"Generic","secretReference":{"name":"webhooksecret"}}]'
     crane.konveyor.io/conversion-warnings: |-
-      [/sample-build] BuildConfig /sample-build sets sourceStrategy.env FOO, BAR, BUILD_LOGLEVEL. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [/sample-build] Output ImageStreamTag "sample-build:latest" resolved to fallback URL: image-registry.openshift-image-registry.svc:5000//sample-build:latest
       [/sample-build] No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.
       [/sample-build] BuildConfig sample-build uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
@@ -27,6 +26,11 @@ spec:
   paramValues:
   - name: builder-image
     value: image-registry.openshift-image-registry.svc:5000/openshift/ruby:3.3-ubi8
+  - name: build-env
+    values:
+    - value: FOO=$(FOO)
+    - value: BAR=$(BAR)
+    - value: BUILD_LOGLEVEL=$(BUILD_LOGLEVEL)
   source:
     git:
       url: https://github.com/openshift/ruby-hello-world.git

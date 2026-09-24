@@ -5,7 +5,6 @@ metadata:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     buildconfig-to-shipwright/original-triggers: '[{"type":"ConfigChange"},{"type":"ImageChange","imageChange":{}}]'
     crane.konveyor.io/conversion-warnings: |-
-      [my-app/sample-nodejs] BuildConfig my-app/sample-nodejs sets sourceStrategy.env NPM_MIRROR. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [my-app/sample-nodejs] Output ImageStreamTag "sample-nodejs:latest" resolved to fallback URL: quay.io/example/my-app/sample-nodejs:latest
       [my-app/sample-nodejs] Output image for ImageStreamTag "my-app/sample-nodejs:latest" was redirected off the internal registry to "quay.io/example/my-app/sample-nodejs:latest"; the ImageStream will no longer be updated, so any Deployment or DeploymentConfig watching it to roll out will stop firing.
       [my-app/sample-nodejs] No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.
@@ -27,6 +26,9 @@ spec:
   paramValues:
   - name: builder-image
     value: registry.access.redhat.com/ubi9/nodejs-18:latest
+  - name: build-env
+    values:
+    - value: NPM_MIRROR=$(NPM_MIRROR)
   source:
     contextDir: source-build
     git:

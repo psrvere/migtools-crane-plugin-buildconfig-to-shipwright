@@ -24,13 +24,13 @@ spec:
       # ImageStreamTag builder reference (BC-011) — resolved to a concrete
       # builder image via --imagestream-mapping during transform. Uses a
       # lightweight, CI-buildable Node.js S2I app.
+      # No env: a Source BuildConfig with env gets a build-env parameter, which
+      # upstream Shipwright's sample source-to-image strategy does not declare,
+      # so the Build would not register on the Minikube cluster (issue #98).
       from:
         kind: ImageStreamTag
         name: nodejs:18-ubi8
         namespace: openshift
-      env:
-        - name: NPM_MIRROR
-          value: https://registry.npmjs.org
   triggers:
     - type: ConfigChange
     - type: ImageChange
