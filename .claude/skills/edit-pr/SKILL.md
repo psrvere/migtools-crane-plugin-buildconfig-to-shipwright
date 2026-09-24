@@ -1,7 +1,7 @@
 ---
 name: edit-pr
 description: Put new work onto a PR that is already open, with this repo's conventions enforced. Commits the working-tree changes by amending the commit they belong to or adding a well-scoped one (five commits at most), rewrites every touched commit message and the PR title and body so each reads as one change, runs the GOWORK=off tests, and after one approval of the planned commit layout pushes to the fork with an archive tag and --force-with-lease. Never touches Jira unless asked. Trigger on "edit-pr", "update the PR", "amend the PR", "push this fix to the PR".
-argument-hint: [PR number | PR URL | BUILD-XXXX | blank] [--work <dir>] [--brief <file>]
+argument-hint: [PR number | PR URL | BUILD-XXXX | blank] [--work <dir>] [--brief <file>] [--rebase <base-sha>] [--approved <file>]
 allowed-tools: [Bash, Read, Write, Edit, AskUserQuestion, Skill]
 user_invocable: true
 ---
@@ -70,6 +70,8 @@ round, leaves its changes uncommitted and hands over here.
 | `BUILD-XXXX` | the open PR from the branch named for that story |
 | `--work <dir>` | the worktree holding the branch; otherwise found with `git worktree list` |
 | `--brief <file>` | what the new change does and which files it covers. `/address-review` writes one; the listed files are the only ones committed |
+| `--rebase <base-sha>` | rebase the PR's commits onto this main commit before placing any new work (Step 5). The caller names the exact commit so the result is the one the user approved. Conflicts replay from git rerere; one rerere cannot resolve is a stop |
+| `--approved <file>` | the user already approved this push in the calling skill. JSON `{"tree": <sha or null>, "by": <skill>}`. Step 4 prints the plan without asking. When `tree` is set, the new head's tree must equal it (Step 5). The Step 6 tests still gate the push |
 
 ## Step 1 — Find the PR, its branch and its worktree
 
@@ -99,7 +101,8 @@ git -C "$WORK" rev-parse HEAD            # must equal headRefOid
 
 A local tip ahead of or diverged from the PR head means unpushed commits: list them with
 `git -C "$WORK" log --oneline <headRefOid>..HEAD` and ask whether they belong in this
-push before going on.
+push before going on. With `--rebase`, a local tip that differs from the PR head is a stop:
+the rebase starts from what the fork has.
 
 ## Step 2 — Read what is there
 
@@ -116,12 +119,15 @@ Read each existing commit's full message and file list
 `status --short` is left alone and named in the report. Without it, show the changed files
 and ask which belong in this push, as `/create-pr` Step 5 does.
 
-Nothing uncommitted and no title or body change asked for: say so and stop.
+Nothing uncommitted, no `--rebase` and no title or body change asked for: say so and stop.
 
 ## Step 3 — Docs check
 
 Run `/create-pr` Step 3b on the uncommitted change. When `/tech-document` runs, its edits
 join the change and are placed in Step 4 like any other file.
+
+With `--approved` and a `tree`, report any doc gap the check finds but edit nothing: an edit
+here would change the tree the user approved. The report names the gap for a later run.
 
 ## Step 4 — Plan the commits
 
@@ -159,6 +165,9 @@ Push this?
 
 Take the user's edits, re-show only what changed, and push on the yes. No push without it.
 
+With `--approved`, print the plan but do not ask: the user approved the content in the
+calling skill. The Step 5 tree check and the Step 6 tests still gate the push.
+
 ## Step 5 — Rebuild the commits
 
 Before touching history, tag the current tip locally so nothing can be lost:
@@ -166,6 +175,30 @@ Before touching history, tag the current tip locally so nothing can be lost:
 ```bash
 git -C "$WORK" tag "backup/edit-pr-$BRANCH-$(date +%Y%m%d%H%M%S)" HEAD
 ```
+
+**With `--rebase <base-sha>`**, rebase before placing any new work. Set the new work aside
+first so the rebase runs on a clean tree: commit it as one temporary commit with
+`git -C "$WORK" commit --only -s -S -m tmp -- <files>`, note its SHA, and
+`git -C "$WORK" reset --hard HEAD~1`. Then:
+
+```bash
+git -C "$WORK" -c rerere.enabled=true -c rerere.autoupdate=true rebase <base-sha>
+```
+
+When the rebase stops, check `git -C "$WORK" diff --name-only --diff-filter=U`. An empty list
+means rerere resolved everything: `git -C "$WORK" -c rerere.enabled=true rebase --continue`
+with `GIT_EDITOR=true`. Any path left is a conflict the user never approved: run
+`git -C "$WORK" rebase --abort`, push nothing, and report the paths. When the rebase ends,
+check each commit's own change survived:
+
+```bash
+git -C "$WORK" range-diff <base-sha> <backup tag> HEAD
+```
+
+A commit shown only on the left (dropped) is a stop. A changed patch is expected only in the
+paths rerere resolved; any other is a stop. Then bring the new work back with
+`git -C "$WORK" cherry-pick -n <tmp sha>` and place it as below. After a rebase the push in
+Step 7 always takes the archive tag and the lease.
 
 Write every commit message to its own file in the scratchpad with the Write tool, never a
 heredoc: messages carry reviewer wording. Each file ends with `Co-Authored-By: Claude`;
@@ -190,8 +223,8 @@ file, one git call per line:
    every old commit and temporary commit it folds together, in their original order, then
    `git -C "$WORK" commit -s -S -F <its message file>`.
 
-Do not rebase onto a newer `origin/main` in the same pass unless the user asked; a moved
-base makes the tree check below harder to read.
+Do not rebase onto a newer `origin/main` in the same pass unless the user asked with
+`--rebase`; a moved base makes the tree check below harder to read.
 
 Then check nothing was lost or added:
 
@@ -202,8 +235,18 @@ git -C "$WORK" log --format='%h %G? %s' origin/main..HEAD               # every 
 git -C "$WORK" log -1 --format=%B <each rebuilt sha>                     # trailer lines last
 ```
 
-The first check only applies after a rebuild. A `%G?` other than `G` on any commit is a
-stop.
+The first check only applies after a rebuild. After `--rebase`, the second check compares
+against the rebased tip (before the new work came back) instead of the backup tag, which sits
+on the old base. A `%G?` other than `G` on any commit is a stop.
+
+With `--approved` and a `tree` in the file, the new head must carry exactly that tree:
+
+```bash
+git -C "$WORK" rev-parse "HEAD^{tree}"                  # must equal the approved tree
+git -C "$WORK" diff --no-ext-diff --stat <tree> HEAD     # names what differs, if it does
+```
+
+A difference is a stop before Step 6: the user approved other content.
 
 ## Step 6 — Test before the push
 
@@ -273,5 +316,8 @@ Tests: GOWORK=off go test passed; documentation suite passed.
 Old fork tip kept as archive/psrvere-old-<branch>.
 Title and body rewritten. Jira not touched.
 ```
+
+Add `Rebased onto <short base-sha>; conflicts replayed: <paths or none>.` when `--rebase` ran,
+and `Approved in <by>; no question asked.` when `--approved` was given.
 
 Name anything left uncommitted in the worktree, and anything skipped.

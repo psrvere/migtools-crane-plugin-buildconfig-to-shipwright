@@ -1,0 +1,28 @@
+{
+  "prs": [
+    {"number": 97, "title": "[BUILD-2439] fix: keep invalid names out", "headRefName": "BUILD-2439-command-name-validation",
+     "url": "https://github.com/o/r/pull/97", "isDraft": false, "mergeStateStatus": "CLEAN",
+     "statusCheckRollup": [
+       {"__typename": "CheckRun", "name": "Build and unit test", "workflowName": "Go build and tests", "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/o/r/actions/runs/111/job/1"}]},
+    {"number": 96, "title": "ci: open monthly PRs for dependency bumps", "headRefName": "BUILD-2501-dependency-automation",
+     "url": "https://github.com/o/r/pull/96", "isDraft": false, "mergeStateStatus": "BLOCKED", "statusCheckRollup": []},
+    {"number": 95, "title": "skills: harden deep-review", "headRefName": "deep-review-skill-hardening",
+     "url": "https://github.com/o/r/pull/95", "isDraft": false, "mergeStateStatus": "DIRTY",
+     "statusCheckRollup": [
+       {"__typename": "CheckRun", "name": "Build and unit test", "workflowName": "Go build and tests", "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/o/r/actions/runs/222/job/2"}]},
+    {"number": 90, "title": "[BUILD-2400] docs: something", "headRefName": "BUILD-2400-docs",
+     "url": "https://github.com/o/r/pull/90", "isDraft": true, "mergeStateStatus": "BEHIND",
+     "statusCheckRollup": [
+       {"__typename": "CheckRun", "name": "E2E test on Minikube with Shipwright", "workflowName": "E2E Tests - Minikube", "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/o/r/actions/runs/333/job/3"},
+       {"__typename": "CheckRun", "name": "Documentation tests", "workflowName": "Documentation tests", "conclusion": "FAILURE",
+        "detailsUrl": "https://github.com/o/r/actions/runs/444/job/4"},
+       {"__typename": "CheckRun", "name": "Build and unit test", "workflowName": "Go build and tests", "conclusion": "CANCELLED",
+        "detailsUrl": "https://github.com/o/r/actions/runs/555/job/5"},
+       {"__typename": "StatusContext", "context": "CodeRabbit", "state": "FAILURE", "targetUrl": "https://coderabbit.ai/x"}]}
+  ],
+  "main": {"Go build and tests": "success", "Documentation tests": "failure", "E2E Tests - Minikube": "success"},
+  "feedback": {"97": 0, "96": 2, "95": 0, "90": 1}
+}

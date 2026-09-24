@@ -1,10 +1,11 @@
 # Development skills
 
-This repo ships ten [Claude Code](https://claude.com/claude-code) workflow skills under
-`.claude/skills/`, plus a writing helper they all share. Together the ten automate the path
+This repo ships eleven [Claude Code](https://claude.com/claude-code) workflow skills under
+`.claude/skills/`, plus a writing helper they all share. Together the eleven automate the path
 from a Jira BUILD issue to a merged pull request: research and triage, implementation, unit
 and cluster testing, a pre-PR review gate, a docs sync, opening the PR, changing the open
-PR, multi-agent review of the published PR, and addressing the feedback that comes back.
+PR, multi-agent review of the published PR, addressing the feedback that comes back, and
+looking after all of your open PRs in one pass.
 
 Each one is invoked as a slash command from inside a clone of this repo. Every skill's
 full instructions live in its own `SKILL.md`. This page is the map, not the manual.
@@ -108,6 +109,7 @@ want.
     /setup-repos update   — re-scan after cloning a new repo
     /deep-review <PR#>    — review any open PR, no local branch needed
     /edit-pr <PR#>        — commit and push new work onto an open PR
+    /babysit-prs          — every open PR you authored: one table, one approval
 ```
 
 Phases 8 and 9 hand over on disk, not through GitHub. `/deep-review` writes its
@@ -141,9 +143,10 @@ avoidable cost in the loop.
 | `/tech-test <ISSUE-KEY or branch> cluster` | Runs the original BuildConfig on a real cluster first, then the converted Build, and compares the two output images by digest and labels. A converted Build that merely succeeds proves nothing. The question is whether it did the same job as the one it replaced. That comparison is what makes it a test rather than a smoke check | A reviewed branch, `oc`, and a cluster | A run report; fixtures archived, then only what it created is deleted |
 | `/tech-document [<ISSUE-KEY>]` | Brings the docs in step with a code change before the branch becomes a PR: the support-matrix row when a warning moved, the architecture page when the pipeline order changed, an ADR when a new rule was decided. Can also audit the whole doc map against the code | A branch whose code changed | Doc edits on the branch, uncommitted |
 | `/create-pr [<ISSUE-KEY>]` | Commits signed-off, tests with `GOWORK=off`, pushes to your fork, and opens the PR against upstream with this repo's conventions enforced, updating the Jira story when asked. Aims for one commit and asks before squashing several. Never pushes to `origin`, and hands over to `/edit-pr` when the branch already has a PR | A branch ready to publish | A commit, a fork push, and an open PR |
-| `/edit-pr [<pr-number\|url>]` | Puts new work onto an open PR. Amends the commit a change fixes or finishes, or adds a well-scoped one, and keeps the PR at five commits or fewer. Rewrites each touched commit message, the PR title and the body so each reads as one change, tests with `GOWORK=off`, and after you approve the planned commits pushes to your fork with an archive tag and `--force-with-lease`. Leaves Jira alone unless asked | An open PR and uncommitted changes on its branch | Rewritten commits on the fork, and a PR title and body that describe the PR as it stands |
+| `/edit-pr [<pr-number\|url>]` | Puts new work onto an open PR. Amends the commit a change fixes or finishes, or adds a well-scoped one, and keeps the PR at five commits or fewer. Rewrites each touched commit message, the PR title and the body so each reads as one change, tests with `GOWORK=off`, and after you approve the planned commits pushes to your fork with an archive tag and `--force-with-lease`. `--rebase <sha>` rebases onto that main commit first, and `--approved <file>` skips the question when a calling skill already got your approval. Leaves Jira alone unless asked | An open PR and uncommitted changes on its branch | Rewritten commits on the fork, and a PR title and body that describe the PR as it stands |
 | `/deep-review <pr-number\|url>` | Up to six reviewers read an open PR in parallel, each with an explicit list of what it does and does not own, so they do not all report the same naming nit. A challenger then runs as its own stage: it reads the findings and the diff, but never the orchestrator's reasoning, and can only delete findings, never add them. If a top-tier reviewer returns nothing, that silence is recorded as a finding rather than passing as a clean bill of health | An open PR | Findings in the terminal, and `verdict.json` plus `verdict.md` in the run directory, which is what `/address-review --from` reads. Posts nothing unless asked |
-| `/address-review [<pr-number\|url>] [--from <verdict.json>]` | Reads every inline thread, review write-up and PR comment, the bots and your own `/deep-review` verdict included, and triages each into fix, answer or push back. `--from` takes that verdict from `/deep-review`'s run directory instead of from a review posted on the PR, and those findings skip triage because deep-review's challenger already adjudicated them. After you approve the table it fixes the code, tests with `GOWORK=off`, hands the commit, the push and the PR body to `/edit-pr`, replies where each comment was left, and resolves the threads | An open PR with feedback, a `/deep-review` verdict file, or both | Fixes committed and pushed through `/edit-pr`; replies and resolved threads on the PR |
+| `/address-review [<pr-number\|url>] [--from <verdict.json>]` | Reads every inline thread, review write-up and PR comment, the bots and your own `/deep-review` verdict included, and triages each into fix, answer or push back. `--from` takes that verdict from `/deep-review`'s run directory instead of from a review posted on the PR, and those findings skip triage because deep-review's challenger already adjudicated them. After you approve the table it fixes the code, tests with `GOWORK=off`, hands the commit, the push and the PR body to `/edit-pr`, replies where each comment was left, and resolves the threads. `--dry-run` also writes the table as `table.json`, and `--approved <table.json>` acts on a table you approved earlier without asking again | An open PR with feedback, a `/deep-review` verdict file, or both | Fixes committed and pushed through `/edit-pr`; replies and resolved threads on the PR |
+| `/babysit-prs [--dry-run] [--pr N ...]` | Looks at every open PR you authored, read-only: behind or conflicting with main, failing checks compared with main, open review items, and the Jira story. Shows one table and waits for one approval. Then it rebases through `/edit-pr` onto the main commit the table was built from, fixes only the CI failures it reproduced and turned green locally, re-runs flaky jobs once, runs `/address-review` on the approved items, and moves Jira stories in Review to Closed when their PR merged and none is open. It never commits or pushes itself | Your open PRs, and `/edit-pr` and `/address-review` | Rebased and fixed PRs pushed through `/edit-pr`, answered threads, closed Jira stories, and a report of what needs you |
 
 ### Shared by every skill
 
@@ -228,6 +231,9 @@ Then publish and review the PR, and address what comes back:
                                  # fix, hand to /edit-pr, reply, resolve
 
 /edit-pr 32                      # any later change to the open PR
+
+/babysit-prs                     # later, all your open PRs at once:
+                                 # rebase, CI, reviews, Jira, one approval
 ```
 
 Push branches to your fork, never to `origin`. Upstream changes land through pull

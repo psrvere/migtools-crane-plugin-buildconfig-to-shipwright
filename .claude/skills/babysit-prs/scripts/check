@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Self-check for the babysit-prs skill: syntax, tests, and dangling references.
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+fail=0
+
+for f in "$HERE"/scripts/*; do
+  case "$f" in *.jq) continue ;; esac
+  if ! bash -n "$f"; then echo "syntax: $f"; fail=1; fi
+  if [ ! -x "$f" ]; then echo "not executable: $f"; fail=1; fi
+done
+
+for jq_file in "$HERE"/scripts/*.jq; do
+  [ -e "$jq_file" ] || continue
+  # null input: a runtime error is fine here, only a parse failure counts
+  if jq -n -f "$jq_file" 2>&1 | grep -qE 'compile error|syntax error'; then echo "jq syntax: $jq_file"; fail=1; fi
+done
+
+for t in "$HERE"/tests/*_test.sh; do
+  [ -e "$t" ] || continue
+  if ! bash "$t"; then echo "test failed: $t"; fail=1; fi
+done
+
+if [ -f "$HERE/SKILL.md" ]; then
+  for ref in $(grep -oE '(scripts|agents)/[A-Za-z0-9_.-]+' "$HERE/SKILL.md" | sort -u); do
+    if [ ! -e "$HERE/$ref" ]; then echo "SKILL.md references missing file: $ref"; fail=1; fi
+  done
+fi
+
+if [ "$fail" -ne 0 ]; then echo "check: FAIL"; exit 1; fi
+echo "check: ok"

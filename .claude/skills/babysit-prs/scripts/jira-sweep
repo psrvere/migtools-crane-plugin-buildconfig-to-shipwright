@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Pair the user's BUILD issues in Review with the user's PRs and decide what to do. Read-only.
+#
+# usage: jira-sweep [OWNER/REPO]
+# Output: JSON array on stdout (see scripts/shape-sweep.jq).
+set -euo pipefail
+
+usage() { echo "usage: jira-sweep [OWNER/REPO]" >&2; exit 1; }
+[ $# -le 1 ] || usage
+if [ -n "${1:-}" ]; then
+  SLUG=$1
+else
+  SLUG=$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+)/([^/]+)$#\1/\2#; s#\.git$##' || true)
+fi
+[[ "$SLUG" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "error: cannot resolve OWNER/REPO (got '$SLUG'); pass it as the argument" >&2; exit 1; }
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+# "No result found" goes to stderr with a non-zero exit; an empty list is a valid answer.
+jira issue list --jql 'project = BUILD AND assignee = currentUser() AND status = Review' \
+  --plain --no-headers --columns key,summary 2>/dev/null > "$TMP/issues.tsv" || true
+jq -R -s '[split("\n")[] | split("\t") | map(select(. != "")) | select(length >= 1 and (.[0] | test("^BUILD-[0-9]+$"))) | {key: .[0], summary: (.[1] // "")}]' \
+  "$TMP/issues.tsv" > "$TMP/issues.json"
+
+gh pr list --repo "$SLUG" --author @me --state all --limit 300 \
+  --json number,title,headRefName,state,url,mergedAt > "$TMP/prs.json"
+
+jq -n --slurpfile i "$TMP/issues.json" --slurpfile p "$TMP/prs.json" '{issues: $i[0], prs: $p[0]}' \
+  | jq -f "$HERE/shape-sweep.jq"

@@ -1,0 +1,15 @@
+{
+  "issues": [
+    {"key": "BUILD-2460", "summary": "address-review"},
+    {"key": "BUILD-24", "summary": "prefix trap"},
+    {"key": "BUILD-2502", "summary": "two PRs"},
+    {"key": "BUILD-2410", "summary": "closed unmerged"}
+  ],
+  "prs": [
+    {"number": 77, "title": "[BUILD-2460] skills: add address-review", "headRefName": "BUILD-2460-address-review", "state": "MERGED", "url": "u77", "mergedAt": "2026-09-05T10:00:00Z"},
+    {"number": 97, "title": "[BUILD-2439] fix: names", "headRefName": "BUILD-2439-command-name-validation", "state": "OPEN", "url": "u97", "mergedAt": null},
+    {"number": 95, "title": "[BUILD-2502] skills: harden", "headRefName": "deep-review-skill-hardening", "state": "OPEN", "url": "u95", "mergedAt": null},
+    {"number": 80, "title": "docs: part of BUILD-2502", "headRefName": "x", "state": "MERGED", "url": "u80", "mergedAt": "2026-09-20T10:00:00Z"},
+    {"number": 60, "title": "[BUILD-2410] feat: dropped", "headRefName": "BUILD-2410-x", "state": "CLOSED", "url": "u60", "mergedAt": null}
+  ]
+}

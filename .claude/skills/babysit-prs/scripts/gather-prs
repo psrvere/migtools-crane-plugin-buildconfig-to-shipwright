@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Collect what babysit-prs needs about each of the user's open PRs. Read-only.
+#
+# usage: gather-prs [OWNER/REPO]
+# Output: JSON array on stdout (see scripts/shape-prs.jq).
+set -euo pipefail
+
+usage() { echo "usage: gather-prs [OWNER/REPO]" >&2; exit 1; }
+[ $# -le 1 ] || usage
+
+if [ -n "${1:-}" ]; then
+  SLUG=$1
+else
+  SLUG=$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+)/([^/]+)$#\1/\2#; s#\.git$##' || true)
+fi
+[[ "$SLUG" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "error: cannot resolve OWNER/REPO (got '$SLUG'); pass it as the argument" >&2; exit 1; }
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+FEEDBACK="$HERE/../../address-review/scripts/get-pr-feedback"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+gh pr list --repo "$SLUG" --author @me --state open --limit 100 \
+  --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup > "$TMP/prs.json"
+
+# Latest main run of every workflow that is failing on some PR, to tell "main is red" apart.
+echo '{}' > "$TMP/main.json"
+jq -r '[.[].statusCheckRollup[]? | select(.__typename == "CheckRun") | select(.conclusion != "SUCCESS" and .conclusion != "SKIPPED" and .conclusion != "NEUTRAL") | .workflowName] | unique[]' \
+  "$TMP/prs.json" > "$TMP/workflows.txt"
+while IFS= read -r wf; do
+  [ -n "$wf" ] || continue
+  c=$(gh run list --repo "$SLUG" --branch main --workflow "$wf" --limit 1 --json conclusion --jq '.[0].conclusion // "none"')
+  jq --arg wf "$wf" --arg c "$c" '. + {($wf): $c}' "$TMP/main.json" > "$TMP/main.next"
+  mv "$TMP/main.next" "$TMP/main.json"
+done < "$TMP/workflows.txt"
+
+# Open feedback per PR, counted the way address-review triages it.
+echo '{}' > "$TMP/feedback.json"
+for n in $(jq -r '.[].number' "$TMP/prs.json"); do
+  count=$("$FEEDBACK" "$n" "$SLUG" | jq '.items | length')
+  jq --arg n "$n" --argjson c "$count" '. + {($n): $c}' "$TMP/feedback.json" > "$TMP/feedback.next"
+  mv "$TMP/feedback.next" "$TMP/feedback.json"
+done
+
+jq -n --slurpfile p "$TMP/prs.json" --slurpfile m "$TMP/main.json" --slurpfile f "$TMP/feedback.json" \
+  '{prs: $p[0], main: $m[0], feedback: $f[0]}' | jq -f "$HERE/shape-prs.jq"
