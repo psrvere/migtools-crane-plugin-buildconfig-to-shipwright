@@ -26,6 +26,7 @@ here refines it or departs from it, and says which.
 | [0014](0014-trusted-ca-generated-volume-fails-visibly.md) | The trusted CA bundle becomes a generated volume that fails visibly |
 | [0015](0015-go-toolchain-parity-with-mta-crane.md) | This module takes Go 1.26 before mta-crane does, and the mta-crane owner decides whether that stands |
 | [0016](0016-drop-what-the-crd-rejects-keep-what-a-setting-rejects.md) | Drop a value the Build CRD rejects, keep one only a cluster setting rejects |
+| [0017](0017-strategy-env-reaches-s2i-by-name.md) | Strategy env reaches s2i by name, from `spec.env` |
 
 A test checks that every file here has those parts, that the index and the files agree, and
 that no link here points at a file that is missing. Nothing checks that a new decision gets a

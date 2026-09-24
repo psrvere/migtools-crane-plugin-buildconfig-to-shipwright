@@ -5,7 +5,6 @@ metadata:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     crane.konveyor.io/conversion-warnings: |-
       [bc-test-05-api-s2i/api-s2i] ImageStream reference "nodejs:16-ubi8" in namespace "openshift" could not be resolved — no --imagestream-mapping provided. Using fallback: image-registry.openshift-image-registry.svc:5000/openshift/nodejs:16-ubi8. Provide --imagestream-mapping to set the correct image reference.
-      [bc-test-05-api-s2i/api-s2i] BuildConfig bc-test-05-api-s2i/api-s2i sets sourceStrategy.env NPM_MIRROR. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [bc-test-05-api-s2i/api-s2i] Incremental build enabled. The first BuildRun fails unless the output image already exists in the target registry, because s2i builds FROM it. Run the first BuildRun with paramValues incremental=false, or push the image once by hand.
       [bc-test-05-api-s2i/api-s2i] Volume "app-config" was converted, but the Build will fail validation (reason: UndefinedVolume) until you: (1) add an overridable volume named 'app-config' to your ClusterBuildStrategy copy — volumes: [{name: app-config, overridable: true, emptyDir: {}}] (placeholder source; the converted Build's override supplies the real Secret/ConfigMap), (2) add a volumeMount for 'app-config' on the strategy build step (original BuildConfig destination paths: /etc/app-config), (3) point the Build at the strategy copy via spec.strategy.name. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
       [bc-test-05-api-s2i/api-s2i] Volumes were converted to Build spec volumes, but the shipped Source-to-Image ClusterBuildStrategy does not declare them: Shipwright will reject the Build (Registered=False, reason: UndefinedVolume) until a matching volume with 'overridable: true' is added to a copy of the strategy. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
@@ -26,6 +25,9 @@ spec:
   paramValues:
   - name: builder-image
     value: image-registry.openshift-image-registry.svc:5000/openshift/nodejs:16-ubi8
+  - name: build-env
+    values:
+    - value: NPM_MIRROR=$(NPM_MIRROR)
   - name: scripts-url
     value: https://github.com/example/s2i-scripts
   - name: incremental

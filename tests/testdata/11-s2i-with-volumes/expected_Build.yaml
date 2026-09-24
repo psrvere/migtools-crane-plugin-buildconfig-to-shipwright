@@ -4,7 +4,6 @@ metadata:
   annotations:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     crane.konveyor.io/conversion-warnings: |-
-      [/mys2itest] BuildConfig /mys2itest sets sourceStrategy.env BUILD_LOGLEVEL. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [/mys2itest] Volume "this-secret" was converted, but the Build will fail validation (reason: UndefinedVolume) until you: (1) add an overridable volume named 'this-secret' to your ClusterBuildStrategy copy — volumes: [{name: this-secret, overridable: true, emptyDir: {}}] (placeholder source; the converted Build's override supplies the real Secret/ConfigMap), (2) add a volumeMount for 'this-secret' on the strategy build step (original BuildConfig destination paths: /var/run/secrets/some-secret), (3) point the Build at the strategy copy via spec.strategy.name. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
       [/mys2itest] Volume "this-configmap" was converted, but the Build will fail validation (reason: UndefinedVolume) until you: (1) add an overridable volume named 'this-configmap' to your ClusterBuildStrategy copy — volumes: [{name: this-configmap, overridable: true, emptyDir: {}}] (placeholder source; the converted Build's override supplies the real Secret/ConfigMap), (2) add a volumeMount for 'this-configmap' on the strategy build step (original BuildConfig destination paths: /var/run/configmaps/some-configmap), (3) point the Build at the strategy copy via spec.strategy.name. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
       [/mys2itest] Volumes were converted to Build spec volumes, but the shipped Source-to-Image ClusterBuildStrategy does not declare them: Shipwright will reject the Build (Registered=False, reason: UndefinedVolume) until a matching volume with 'overridable: true' is added to a copy of the strategy. See docs/volume-migration.md in the crane-plugin-buildconfig-to-shipwright repository.
@@ -26,6 +25,9 @@ spec:
   paramValues:
   - name: builder-image
     value: quay.io/redhat-developer/test-build-simples2i:1.2
+  - name: build-env
+    values:
+    - value: BUILD_LOGLEVEL=$(BUILD_LOGLEVEL)
   source:
     local:
       name: local-copy
@@ -43,4 +45,3 @@ spec:
       defaultMode: 420
       name: my-configmap
     name: this-configmap
-

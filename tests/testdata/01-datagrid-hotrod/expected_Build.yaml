@@ -5,7 +5,6 @@ metadata:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     buildconfig-to-shipwright/original-triggers: '[{"type":"GitHub"},{"type":"Generic"},{"type":"ImageChange","imageChange":{}},{"type":"ConfigChange"}]'
     crane.konveyor.io/conversion-warnings: |-
-      [/eap-app] BuildConfig /eap-app sets sourceStrategy.env MAVEN_MIRROR_URL, MAVEN_ARGS_APPEND, ARTIFACT_DIR. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [/eap-app] Output ImageStreamTag "eap-app:latest" resolved to fallback URL: image-registry.openshift-image-registry.svc:5000//eap-app:latest
       [/eap-app] No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.
       [/eap-app] BuildConfig eap-app uses runPolicy "Serial", which is dropped: OpenShift queued its builds and ran them one at a time, but Shipwright BuildRuns run concurrently. Serialize the runs in your CI/CD pipeline if build ordering matters, for example when several BuildRuns push the same image tag
@@ -28,6 +27,11 @@ spec:
   paramValues:
   - name: builder-image
     value: quay.io/jboss-eap71-openshift:1.3
+  - name: build-env
+    values:
+    - value: MAVEN_MIRROR_URL=$(MAVEN_MIRROR_URL)
+    - value: MAVEN_ARGS_APPEND=$(MAVEN_ARGS_APPEND)
+    - value: ARTIFACT_DIR=$(ARTIFACT_DIR)
   - name: pull-policy
     value: always
   source:

@@ -5,7 +5,6 @@ metadata:
     buildconfig-to-shipwright/conversion-outcome: converted-with-warnings
     buildconfig-to-shipwright/original-triggers: '[{"type":"ConfigChange"},{"type":"ImageChange","imageChange":{}}]'
     crane.konveyor.io/conversion-warnings: |-
-      [${NAMESPACE}/${BUILD_NAME}] BuildConfig ${NAMESPACE}/${BUILD_NAME} sets sourceStrategy.env NPM_MIRROR. The source-to-image strategy does not pass spec.env to s2i, so the assemble script and the output image do not see them. Set each one as NAME=VALUE in the Build's build-env parameter, which the strategy accepts from Builds 1.9, or see https://redhat.atlassian.net/browse/BUILD-2500
       [${NAMESPACE}/${BUILD_NAME}] Output ImageStreamTag "${BUILD_NAME}:latest" resolved to fallback URL: ${REGISTRY}/${NAMESPACE}/${BUILD_NAME}:latest
       [${NAMESPACE}/${BUILD_NAME}] Output image for ImageStreamTag "${NAMESPACE}/${BUILD_NAME}:latest" was redirected off the internal registry to "${REGISTRY}/${NAMESPACE}/${BUILD_NAME}:latest"; the ImageStream will no longer be updated, so any Deployment or DeploymentConfig watching it to roll out will stop firing.
       [${NAMESPACE}/${BUILD_NAME}] No explicit pushSecret found for ImageStreamTag output. Ensure the BuildRun uses a ServiceAccount with internal registry push access.
@@ -19,9 +18,6 @@ metadata:
   name: ${BUILD_NAME}
   namespace: ${NAMESPACE}
 spec:
-  env:
-  - name: NPM_MIRROR
-    value: https://registry.npmjs.org
   output:
     image: ${REGISTRY}/${NAMESPACE}/${BUILD_NAME}:latest
     insecure: true
